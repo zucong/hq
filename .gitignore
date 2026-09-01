@@ -1,0 +1,10 @@
+bin/
+records/
+.hq-test-*/
+*.sock
+*.lock
+*.tmp
+SHA256SUMS
+dist/
+release/
+.DS_Store

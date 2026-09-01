@@ -1,0 +1,127 @@
+version: 3
+workspace_label: example-hq
+owner_principal: Ada
+role_cards:
+    - role_card_id: secretary
+      version: 1
+      label: 总裁秘书
+      department: ceo-office
+      capabilities:
+        - account_closure
+        - approval_witness
+        - organization_operations
+      manual_path: ceo-office/staff/secretary/v1/AGENTS.md
+      manual_digest: a87a0a3d265dff1537a0d2c12b04b635a46d0113f38300b3a69ea3914b1733ee
+      role_card_digest: b5f80c11c210f72ad7a9949e47876b18613276309c37bd1ca52f0a81a6b4de49
+      status: approved
+      approval_ref: ceo-office/decisions/company-init.md
+    - role_card_id: delivery-manager
+      version: 1
+      label: 交付负责人
+      department: delivery
+      capabilities:
+        - manager:delivery
+      manual_path: delivery/staff/delivery-manager/v1/AGENTS.md
+      manual_digest: 4b5ea2d1b4bac55d7dc9bbeac33708f8b22d2f1e30147acd0a2917c94c16bd94
+      role_card_digest: aa3fcf4fc49e9c83bdc5572e2b6e571d03d9595d627d92984fb9de90ac3d396f
+      status: approved
+      approval_ref: ceo-office/decisions/company-init.md
+    - role_card_id: delivery-specialist
+      version: 1
+      label: 交付专员
+      department: delivery
+      capabilities:
+        - specialist:delivery
+      manual_path: delivery/staff/delivery-specialist/v1/AGENTS.md
+      manual_digest: cb7523f12095e3d1234871333d458106afce37664ec2e21d2228d71c0c3454c4
+      role_card_digest: 1762d325fce82fac64473cb9765c9c341ea44663610289cb0ec2c932dd0348e1
+      status: approved
+      approval_ref: ceo-office/decisions/company-init.md
+agents:
+    - name: example-secretary
+      sender_label: 总裁办-总裁秘书
+      nickname: 总裁秘书
+      department_label: 总裁办
+      workspace: example-hq
+      responsibilities:
+        - approval_witness
+        - account_closer
+        - executive_secretary
+      manual_path: ceo-office/staff/secretary/v1/AGENTS.md
+      role_card_id: secretary
+      role_card_version: 1
+      role_card_digest: b5f80c11c210f72ad7a9949e47876b18613276309c37bd1ca52f0a81a6b4de49
+      workstation_path: ceo-office/staff/secretary/v1
+      activation_policy: always
+      max_wip: 16
+      seat_version: 1
+      seat_digest: 7e0c16d566a031ce9539e3713dc6ab7def4693ea66e5c0fd2d78da589e16fd56
+      department: ceo-office
+      kind: codex
+      permission_mode: native
+      reports_to: ""
+      disabled: false
+      can_create: true
+      can_issue: true
+      can_accept: true
+      can_close: true
+      can_manage_staff: true
+      can_receive_order: true
+    - name: example-delivery-manager
+      sender_label: 交付部-交付负责人
+      nickname: 交付负责人
+      department_label: 交付部
+      workspace: example-hq
+      responsibilities:
+        - manager:delivery
+      manual_path: delivery/staff/delivery-manager/v1/AGENTS.md
+      role_card_id: delivery-manager
+      role_card_version: 1
+      role_card_digest: aa3fcf4fc49e9c83bdc5572e2b6e571d03d9595d627d92984fb9de90ac3d396f
+      workstation_path: delivery/staff/delivery-manager/v1
+      activation_policy: always
+      max_wip: 8
+      seat_version: 1
+      seat_digest: d509e02e2a7ec9e9ecbe348a188339238c5f604833d928afa5bc6f069e15b693
+      department: delivery
+      kind: codex
+      permission_mode: native
+      reports_to: example-secretary
+      disabled: false
+      can_create: true
+      can_issue: true
+      can_accept: true
+      can_close: false
+      can_manage_staff: false
+      can_receive_order: true
+    - name: example-delivery-specialist
+      sender_label: 交付部-交付专员
+      nickname: 交付专员
+      department_label: 交付部
+      workspace: example-hq
+      responsibilities:
+        - specialist:delivery
+      manual_path: delivery/staff/delivery-specialist/v1/AGENTS.md
+      role_card_id: delivery-specialist
+      role_card_version: 1
+      role_card_digest: 1762d325fce82fac64473cb9765c9c341ea44663610289cb0ec2c932dd0348e1
+      workstation_path: delivery/staff/delivery-specialist/v1
+      activation_policy: on_assignment
+      keep_warm: 30s
+      max_wip: 1
+      seat_version: 1
+      seat_digest: 8bab3903e12453a3f149e5b0fa6d78a3fe49ae7432408db4903a62de888989d7
+      department: delivery
+      kind: codex
+      permission_mode: native
+      reports_to: example-delivery-manager
+      disabled: false
+      can_create: false
+      can_issue: false
+      can_accept: true
+      can_close: false
+      can_manage_staff: false
+      can_receive_order: true
+delivery_policy:
+    default_mode: auto
+    max_consecutive_wakes: 3
