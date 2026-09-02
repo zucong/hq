@@ -27,6 +27,7 @@ type App struct {
 	Direct                bool
 	CallerPane            string
 	MaintenancePane       string
+	HostColdStart         bool
 	FromGateway           bool
 	ProductionRuntime     bool
 	Out                   io.Writer
@@ -227,6 +228,20 @@ func (a *App) run(rest []string) error {
 		return fmt.Errorf("缺少命令；运行 hq help 查看用法")
 	}
 	if a.FromGateway {
+		return a.dispatch(rest)
+	}
+	if rest[0] == "up" && a.ProductionRuntime && os.Getenv("HERDR_ENV") != "1" && a.MaintenancePane == "" {
+		if a.Direct {
+			return fmt.Errorf("宿主机冷启动直接使用 hq up；删除 --direct。--direct 不授予公司启动权")
+		}
+		if err := validateProductionRuntime(runtimePaths{Office: a.Office, HQRoot: a.HQRoot, DataDir: a.DataDir, ConfigPath: a.ConfigPath, HerdrBin: a.HerdrBin}); err != nil {
+			return fmt.Errorf("宿主机冷启动根核验失败：%w", err)
+		}
+		if err := a.requireCompletedInit(); err != nil {
+			return err
+		}
+		a.HostColdStart = true
+		a.MaintenanceActor = "hq-up-host"
 		return a.dispatch(rest)
 	}
 	if a.Direct && !isMaintenanceCommand(rest) {

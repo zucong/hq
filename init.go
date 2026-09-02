@@ -25,18 +25,21 @@ import (
 const minimalTemplateDepartment = "delivery"
 
 type initOptions struct {
-	CompanyName, Owner, Workspace, Template string
-	SecretaryName, SecretaryNickname        string
-	SecretaryKind, DefaultAgentKind         string
-	SecretaryAgentArgs, DefaultAgentArgs    []string
-	PermissionMode                          string
-	Silent, PrepareOnly                     bool
+	CompanyName, Owner, Workspace, Template, OrganizationSpec string
+	SecretaryName, SecretaryNickname                          string
+	SecretaryKind, DefaultAgentKind                           string
+	SecretaryAgentArgs, DefaultAgentArgs                      []string
+	PermissionMode                                            string
+	Silent, PrepareOnly                                       bool
 }
 
 type initPlan struct {
 	Root, CompanyName, Owner, Workspace, Template   string
+	InitSource, OrganizationSpecDigest              string
+	OrganizationSpecRaw                             []byte
 	SecretaryKind, DefaultAgentKind, PermissionMode string
 	Config                                          Config
+	ManualProfiles                                  map[string]roleManualProfile
 }
 
 type templateAgent struct {
@@ -120,6 +123,7 @@ func (a *App) cmdInit(args []string) error {
 	owner := fs.String("owner", "", "公司所有者 principal")
 	workspace := fs.String("workspace", "", "Herdr workspace slug")
 	template := fs.String("template", "", "组织模板")
+	organizationSpec := fs.String("organization-spec", "", "已批准的自定义组织规范 YAML；与 --template 互斥")
 	secretaryName := fs.String("secretary-name", "secretary", "总裁秘书稳定 slug 的基础名称")
 	secretaryNickname := fs.String("secretary-nickname", "总裁秘书", "总裁秘书显示名称")
 	secretaryKind := fs.String("secretary-kind", "codex", "秘书 Agent kind")
@@ -139,12 +143,29 @@ func (a *App) cmdInit(args []string) error {
 	if err != nil {
 		return fmt.Errorf("解析 company-directory：%w", err)
 	}
-	opts := initOptions{CompanyName: *companyName, Owner: *owner, Workspace: *workspace, Template: *template,
+	opts := initOptions{CompanyName: *companyName, Owner: *owner, Workspace: *workspace, Template: *template, OrganizationSpec: *organizationSpec,
 		SecretaryName: *secretaryName, SecretaryNickname: *secretaryNickname,
 		SecretaryKind: *secretaryKind, DefaultAgentKind: *defaultKind,
 		SecretaryAgentArgs: append([]string(nil), (*secretaryAgentArgs)...), DefaultAgentArgs: append([]string(nil), (*defaultAgentArgs)...),
 		PermissionMode: *permissionMode,
 		Silent:         *silent, PrepareOnly: *prepareOnly}
+	if existing, existingErr := existingInitPlan(root); existingErr != nil {
+		return existingErr
+	} else if existing != nil && !initFormationFlagsChanged(fs) {
+		if opts.PrepareOnly {
+			fmt.Fprintf(a.Out, "HQ init：公司已准备并通过静态校验（agents=%d）；未连接 Herdr。\n", len(existing.Config.Agents))
+			fmt.Fprintf(a.Out, "下一步：在宿主机运行公司本地 ceo-office/tools/hq/bin/hq init %s 完成首次初始化。\n", root)
+			return nil
+		}
+		started, err := a.startInitPlan(*existing)
+		if err != nil {
+			return fmt.Errorf("公司文件已存在，但首次启动未完成；修复后重跑 hq init %s 即可续跑：%w", root, err)
+		}
+		if started {
+			fmt.Fprintf(a.Out, "HQ init：公司首次初始化完成（agents=%d，workspace=%s）。\n", len(existing.Config.Agents), existing.Workspace)
+		}
+		return nil
+	}
 	if !opts.Silent {
 		if err := a.runInitWizard(root, &opts); err != nil {
 			return err
@@ -164,15 +185,48 @@ func (a *App) cmdInit(args []string) error {
 	}
 	unlock(initLock)
 	if opts.PrepareOnly {
-		fmt.Fprintf(a.Out, "HQ init：公司已准备并通过静态校验（template=%s，agents=%d）；未连接 Herdr。\n", plan.Template, len(plan.Config.Agents))
-		fmt.Fprintln(a.Out, "下一步：从总裁秘书工位运行公司本地 ceo-office/tools/hq/bin/hq up。")
+		fmt.Fprintf(a.Out, "HQ init：公司已准备并通过静态校验（source=%s，agents=%d）；未连接 Herdr。\n", plan.InitSource, len(plan.Config.Agents))
+		fmt.Fprintf(a.Out, "下一步：在宿主机运行公司本地 ceo-office/tools/hq/bin/hq init %s 完成首次初始化。\n", plan.Root)
 		return nil
 	}
-	if err := a.startInitPlan(plan); err != nil {
+	started, err := a.startInitPlan(plan)
+	if err != nil {
 		return fmt.Errorf("公司文件已完整生成，但首次启动未完成；修复后重跑同一 init 命令即可续跑：%w", err)
 	}
-	fmt.Fprintf(a.Out, "HQ init：公司已建立并启动（template=%s，agents=%d，workspace=%s）。\n", plan.Template, len(plan.Config.Agents), plan.Workspace)
+	if started {
+		fmt.Fprintf(a.Out, "HQ init：公司已建立并启动（source=%s，agents=%d，workspace=%s）。\n", plan.InitSource, len(plan.Config.Agents), plan.Workspace)
+	}
 	return nil
+}
+
+func initFormationFlagsChanged(fs *leafParser) bool {
+	for _, name := range []string{"company-name", "owner", "workspace", "template", "organization-spec", "secretary-name", "secretary-nickname", "secretary-kind", "default-agent-kind", "secretary-agent-arg", "default-agent-arg", "permission-mode"} {
+		if fs.Changed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func existingInitPlan(root string) (*initPlan, error) {
+	configPath := defaultConfigPath(filepath.Join(root, "ceo-office"))
+	if _, err := os.Lstat(configPath); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	canonicalRoot, err := canonicalExistingDirectory(root, "existing company root")
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := loadConfig(defaultConfigPath(filepath.Join(canonicalRoot, "ceo-office")))
+	if err != nil {
+		return nil, fmt.Errorf("读取已准备公司的 registry：%w", err)
+	}
+	if err := validateRegistryManuals(cfg, canonicalRoot); err != nil {
+		return nil, fmt.Errorf("已准备公司的岗位手册校验失败：%w", err)
+	}
+	return &initPlan{Root: canonicalRoot, Owner: cfg.ownerPrincipal(), Workspace: cfg.WorkspaceLabel, InitSource: "prepared-company", Config: cfg}, nil
 }
 
 func lockInitTarget(root string) (*os.File, error) {
@@ -205,21 +259,23 @@ func (a *App) runInitWizard(root string, opts *initOptions) error {
 	if opts.Workspace, err = promptLine(reader, a.Out, "Herdr workspace", opts.Workspace, slugify(base)+"-hq"); err != nil {
 		return err
 	}
-	fmt.Fprintln(a.Out, "组织模板：")
-	for index, item := range companyTemplates {
-		fmt.Fprintf(a.Out, "  %d. %s (%s) — %s\n", index+1, item.Slug, item.Label, item.Summary)
-	}
-	if opts.Template, err = promptLine(reader, a.Out, "模板编号或名称", opts.Template, "product-engineering"); err != nil {
-		return err
-	}
-	if number, numberErr := strconv.Atoi(opts.Template); numberErr == nil && number >= 1 && number <= len(companyTemplates) {
-		opts.Template = companyTemplates[number-1].Slug
-	}
-	if opts.SecretaryName, err = promptLine(reader, a.Out, "总裁秘书 slug 基础名称", opts.SecretaryName, "secretary"); err != nil {
-		return err
-	}
-	if opts.SecretaryNickname, err = promptLine(reader, a.Out, "总裁秘书显示名称", opts.SecretaryNickname, "总裁秘书"); err != nil {
-		return err
+	if strings.TrimSpace(opts.OrganizationSpec) == "" {
+		fmt.Fprintln(a.Out, "组织模板（也可预先传 --organization-spec 跳过模板）：")
+		for index, item := range companyTemplates {
+			fmt.Fprintf(a.Out, "  %d. %s (%s) — %s\n", index+1, item.Slug, item.Label, item.Summary)
+		}
+		if opts.Template, err = promptLine(reader, a.Out, "模板编号或名称", opts.Template, "product-engineering"); err != nil {
+			return err
+		}
+		if number, numberErr := strconv.Atoi(opts.Template); numberErr == nil && number >= 1 && number <= len(companyTemplates) {
+			opts.Template = companyTemplates[number-1].Slug
+		}
+		if opts.SecretaryName, err = promptLine(reader, a.Out, "总裁秘书 slug 基础名称", opts.SecretaryName, "secretary"); err != nil {
+			return err
+		}
+		if opts.SecretaryNickname, err = promptLine(reader, a.Out, "总裁秘书显示名称", opts.SecretaryNickname, "总裁秘书"); err != nil {
+			return err
+		}
 	}
 	if opts.SecretaryKind, err = promptLine(reader, a.Out, "秘书 Agent kind", opts.SecretaryKind, "codex"); err != nil {
 		return err
@@ -274,10 +330,18 @@ func slugify(value string) string {
 
 func buildInitPlan(root string, opts initOptions) (initPlan, error) {
 	missing := []string{}
-	for name, value := range map[string]string{"--company-name": opts.CompanyName, "--owner": opts.Owner, "--workspace": opts.Workspace, "--template": opts.Template} {
+	for name, value := range map[string]string{"--company-name": opts.CompanyName, "--owner": opts.Owner, "--workspace": opts.Workspace} {
 		if strings.TrimSpace(value) == "" {
 			missing = append(missing, name)
 		}
+	}
+	hasTemplate := strings.TrimSpace(opts.Template) != ""
+	hasOrganizationSpec := strings.TrimSpace(opts.OrganizationSpec) != ""
+	if hasTemplate && hasOrganizationSpec {
+		return initPlan{}, fmt.Errorf("--template 与 --organization-spec 互斥；请选择恰好一个初始化来源")
+	}
+	if !hasTemplate && !hasOrganizationSpec {
+		missing = append(missing, "恰好一个 --template 或 --organization-spec")
 	}
 	sort.Strings(missing)
 	if len(missing) != 0 {
@@ -305,6 +369,16 @@ func buildInitPlan(root string, opts initOptions) (initPlan, error) {
 	secretaryNickname, err := validateShortText("secretary-nickname", opts.SecretaryNickname, true)
 	if err != nil {
 		return initPlan{}, err
+	}
+	if hasOrganizationSpec {
+		compiled, err := loadAndCompileOrganizationSpec(opts.OrganizationSpec, opts)
+		if err != nil {
+			return initPlan{}, err
+		}
+		return initPlan{Root: filepath.Clean(root), CompanyName: opts.CompanyName, Owner: opts.Owner, Workspace: opts.Workspace,
+			InitSource: "organization-spec:" + compiled.Spec.ID, OrganizationSpecDigest: compiled.Digest,
+			OrganizationSpecRaw: compiled.Raw, SecretaryKind: opts.SecretaryKind, DefaultAgentKind: opts.DefaultAgentKind,
+			PermissionMode: opts.PermissionMode, Config: compiled.Config, ManualProfiles: compiled.Profiles}, nil
 	}
 	var selected *companyTemplate
 	for index := range companyTemplates {
@@ -368,7 +442,7 @@ func buildInitPlan(root string, opts initOptions) (initPlan, error) {
 	if err := validateConfig(cfg); err != nil {
 		return initPlan{}, fmt.Errorf("模板生成了无效配置：%w", err)
 	}
-	return initPlan{Root: filepath.Clean(root), CompanyName: opts.CompanyName, Owner: opts.Owner, Workspace: opts.Workspace, Template: opts.Template,
+	return initPlan{Root: filepath.Clean(root), CompanyName: opts.CompanyName, Owner: opts.Owner, Workspace: opts.Workspace, Template: opts.Template, InitSource: "template:" + opts.Template,
 		SecretaryKind: opts.SecretaryKind, DefaultAgentKind: opts.DefaultAgentKind, PermissionMode: opts.PermissionMode, Config: cfg}, nil
 }
 
@@ -445,6 +519,12 @@ func (a *App) materializeInitPlan(plan initPlan) error {
 		{label: "HQ 配置", path: configPath, content: configRaw},
 		{label: "公司本地 HQ 二进制", path: filepath.Join(office, "tools", "hq", "bin", "hq"), content: binaryRaw, mode: 0o755},
 	}
+	if len(plan.OrganizationSpecRaw) != 0 {
+		entries = append(entries,
+			initEntry{label: "公司成立输入目录", path: filepath.Join(office, "formation"), directory: true},
+			initEntry{label: "已批准组织规范（成立证据）", path: filepath.Join(office, "formation", "organization-spec.yaml"), content: plan.OrganizationSpecRaw},
+		)
+	}
 	seen := map[string]bool{"ceo-office": true}
 	for _, rule := range plan.Config.Agents {
 		if seen[rule.Department] {
@@ -454,9 +534,16 @@ func (a *App) materializeInitPlan(plan initPlan) error {
 		entries = append(entries, initEntry{label: rule.DepartmentLabel + "目录", path: filepath.Join(plan.Root, rule.Department), directory: true})
 	}
 	for _, rule := range plan.Config.Agents {
+		profile, hasProfile := plan.ManualProfiles[rule.Name]
+		var manual []byte
+		if hasProfile {
+			manual = agentRoleCardManualWithProfile(plan.CompanyName, plan.Workspace, rule, profile)
+		} else {
+			manual = agentRoleCardManual(plan.CompanyName, plan.Workspace, rule)
+		}
 		entries = append(entries,
 			initEntry{label: rule.Nickname + "独立工位", path: filepath.Join(plan.Root, rule.WorkstationPath), directory: true},
-			initEntry{label: rule.Nickname + "角色卡", path: filepath.Join(plan.Root, rule.ManualPath), content: agentRoleCardManual(plan.CompanyName, plan.Workspace, rule)})
+			initEntry{label: rule.Nickname + "角色卡", path: filepath.Join(plan.Root, rule.ManualPath), content: manual})
 	}
 	if err := preflightInitEntries(entries); err != nil {
 		return err
@@ -513,10 +600,10 @@ func (a *App) now() time.Time {
 
 func formationDecision(plan initPlan, at time.Time) ([]byte, error) {
 	digestInput, _ := json.Marshal(struct {
-		Company, Owner, Workspace, Template string
-		Agents                              []AgentRule
-		RoleCards                           []RoleCard
-	}{plan.CompanyName, plan.Owner, plan.Workspace, plan.Template, plan.Config.Agents, plan.Config.RoleCards})
+		Company, Owner, Workspace, Source, OrganizationSpecDigest string
+		Agents                                                    []AgentRule
+		RoleCards                                                 []RoleCard
+	}{plan.CompanyName, plan.Owner, plan.Workspace, plan.InitSource, plan.OrganizationSpecDigest, plan.Config.Agents, plan.Config.RoleCards})
 	digest := sha256.Sum256(digestInput)
 	metadata := ApprovalMetadata{Version: 1, DecisionID: "DEC-COMPANY-INIT-001", Status: "effective", ConfirmedBy: plan.Owner,
 		ConfirmedAt: at.Format(time.RFC3339), Scopes: []ApprovalScope{{Action: "company:init", Target: plan.Workspace, RequestDigest: hex.EncodeToString(digest[:])}}}
@@ -524,41 +611,45 @@ func formationDecision(plan initPlan, at time.Time) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := fmt.Sprintf("# %s 公司成立决策\n\n所有者 `%s` 确认以 `%s` 模板建立 workspace `%s`。组织变更由总裁秘书依正式人事协议执行。\n", plan.CompanyName, plan.Owner, plan.Template, plan.Workspace)
+	body := fmt.Sprintf("# %s 公司成立决策\n\n所有者 `%s` 确认以 `%s` 建立 workspace `%s`。组织变更由总部联系职责位依正式人事协议执行。", plan.CompanyName, plan.Owner, plan.InitSource, plan.Workspace)
+	if plan.OrganizationSpecDigest != "" {
+		body += fmt.Sprintf("\n\n成立时自定义组织规范已保存至 `ceo-office/formation/organization-spec.yaml`，SHA-256 为 `%s`；它是成立证据，`ceo-office/tools/hq/config.yaml` 才是唯一实时组织注册表。", plan.OrganizationSpecDigest)
+	}
+	body += "\n"
 	return []byte(approvalHeaderMarker + string(raw) + metadataHeaderEnd + body), nil
 }
 
 func companyReadme(plan initPlan) []byte {
-	return []byte(fmt.Sprintf("# %s\n\n- 所有者：%s\n- Herdr workspace：%s\n- 初始化模板：%s\n- HQ：`ceo-office/tools/hq/bin/hq`\n- Agent 上岗与协作：`AGENT-HANDBOOK.md`\n\nHQ init 不使用 LLM API。公司启动后，由总裁秘书按公司决策调整人员和组织架构。`ceo-office/tools/hq/config.yaml` 是唯一组织编制与 employee seat 注册表；每名员工的固定行为、职责和边界由个人版本目录中的 `AGENTS.md` 定义。\n", plan.CompanyName, plan.Owner, plan.Workspace, plan.Template))
+	return []byte(fmt.Sprintf("# %s\n\n- 所有者：%s\n- Herdr workspace：%s\n- 初始化来源：%s\n- HQ：`ceo-office/tools/hq/bin/hq`\n- Agent 上岗与协作：`AGENT-HANDBOOK.md`\n\nHQ init 不使用 LLM API。公司启动后，由总部联系职责位按公司决策调整人员和组织架构。`ceo-office/tools/hq/config.yaml` 是唯一组织编制与 employee seat 注册表；每名员工的固定行为、职责和边界由个人版本目录中的 `AGENTS.md` 定义。自定义 organization spec 只作为成立证据保存，不是第二份实时 roster。\n", plan.CompanyName, plan.Owner, plan.Workspace, plan.InitSource))
 }
 
-func (a *App) startInitPlan(plan initPlan) error {
+func (a *App) startInitPlan(plan initPlan) (bool, error) {
 	herdr := a.HerdrBin
 	control := a.Herdr
 	if control == nil {
 		var err error
 		herdr, err = resolveHerdrExecutable(a.HerdrBin)
 		if err != nil {
-			return err
+			return false, err
 		}
 		control, err = newExecHerdrControl(herdr)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 	office := filepath.Join(plan.Root, "ceo-office")
 	data := filepath.Join(office, "records")
 	socket, err := gatewaySocketPath(data)
 	if err != nil {
-		return fmt.Errorf("init 启动任何 agent 前解析 gateway socket：%w", err)
+		return false, fmt.Errorf("init 启动任何 agent 前解析 gateway socket：%w", err)
 	}
 	if err := ensureGatewaySocketRuntimeDir(socket, data); err != nil {
-		return fmt.Errorf("init 启动任何 agent 前准备 gateway runtime：%w", err)
+		return false, fmt.Errorf("init 启动任何 agent 前准备 gateway runtime：%w", err)
 	}
 	configPath := defaultConfigPath(office)
 	installedConfig, err := loadConfig(configPath)
 	if err != nil {
-		return fmt.Errorf("重载已安装的 init registry：%w", err)
+		return false, fmt.Errorf("重载已安装的 init registry：%w", err)
 	}
 	store := NewStore(data)
 	gateway := a.GatewayHealth
@@ -570,56 +661,9 @@ func (a *App) startInitPlan(plan initPlan) error {
 		GatewayHealth: gateway, Sessions: &FileSessionStore{Root: filepath.Join(data, "sessions")}, Clock: a.Clock, Sleep: a.Sleep,
 	}, a.Out, a.Err)
 	if err != nil {
-		return err
+		return false, err
 	}
-	app.MaintenanceActor = "hq-init"
-	lock, err := app.lockUp()
-	if err != nil {
-		return err
-	}
-	defer unlock(lock)
-	ctx := context.Background()
-	workspaceID, err := app.ensureHQWorkspace(ctx)
-	if err != nil {
-		return err
-	}
-	var secretary AgentRule
-	for _, rule := range installedConfig.Agents {
-		if rule.hasResponsibility(roleApprovalWitness) {
-			secretary = rule
-			break
-		}
-	}
-	if secretary.Name == "" {
-		return fmt.Errorf("init 配置缺少总裁秘书")
-	}
-	if err := app.startInitAgentIfNeeded(ctx, workspaceID, secretary); err != nil {
-		return err
-	}
-	snapshot, err := app.herdrSnapshot(ctx)
-	if err != nil {
-		return err
-	}
-	for _, agent := range snapshot.Agents {
-		if agent.Name == secretary.Name && agent.WorkspaceID == workspaceID {
-			app.MaintenancePane = agent.PaneID
-			break
-		}
-	}
-	if app.MaintenancePane == "" {
-		return fmt.Errorf("秘书启动后未找到稳定 pane，拒绝启动网关")
-	}
-	if err := app.ensureHQGateway(ctx, workspaceID); err != nil {
-		return err
-	}
-	for _, rule := range installedConfig.Agents {
-		if rule.Name != secretary.Name && rule.ActivationPolicy == activationAlways && !rule.Disabled {
-			if err := app.startInitAgentIfNeeded(ctx, workspaceID, rule); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return app.completeFirstInit(context.Background())
 }
 
 func (a *App) startInitAgentIfNeeded(ctx context.Context, workspaceID string, rule AgentRule) error {

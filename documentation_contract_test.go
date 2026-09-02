@@ -40,7 +40,7 @@ func TestDocumentationContractREADMEPublishesCurrentRegistryAndBootstrap(t *test
 	for _, want := range []string{
 		"## 首次连接 Herdr",
 		"can_manage_staff=true",
-		"先启动总裁秘书",
+		"总部联系职责位 → 回收 Herdr 自动创建的空 root tab → gateway",
 		"manager:<department>",
 		"runtime `sender_label`",
 		"role_cards:",

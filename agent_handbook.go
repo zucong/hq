@@ -175,7 +175,10 @@ var specialistRoleProfiles = map[string]roleManualProfile{
 }
 
 func agentRoleCardManual(companyName, workspace string, rule AgentRule) []byte {
-	profile := profileForAgent(rule)
+	return agentRoleCardManualWithProfile(companyName, workspace, rule, profileForAgent(rule))
+}
+
+func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRule, profile roleManualProfile) []byte {
 	parent := rule.ReportsTo
 	if parent == "" {
 		parent = "公司所有者"

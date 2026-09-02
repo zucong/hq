@@ -557,7 +557,7 @@ func TestCLIReleaseInitHelpAndVersion(t *testing.T) {
 	if err := execute([]string{"init", "--help"}, &help, &help); err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"<company-directory>", "--silent", "--company-name", "--owner", "--template", "--secretary-name", "--secretary-nickname", "--prepare-only", "LLM API"} {
+	for _, required := range []string{"<company-directory>", "--silent", "--company-name", "--owner", "--template", "--organization-spec", "--secretary-name", "--secretary-nickname", "--prepare-only", "LLM API"} {
 		if !strings.Contains(help.String(), required) {
 			t.Fatalf("init help missing %q:\n%s", required, help.String())
 		}

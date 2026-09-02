@@ -119,15 +119,16 @@ func newCobraRootCommand(options globalOptions, out, errOut io.Writer) *cobra.Co
 	}
 
 	upCommand := leaf("up [agent]", "按 HQ 配置启动公司并确保网关在线", "up")
-	upCommand.Long = `按 HQ registry 幂等启动公司 agent，并确保本地写入网关在线。
+	upCommand.Long = `按 HQ registry 幂等启动已经完成 init 的公司，并确保本地写入网关在线。
 
 正式实例不接受全局 --config、--data、--herdr 覆盖（exit 70）；--office 只选择一个经过
 canonical 校验的公司实例。合成集成验证使用 README“构建与安全首验”中的 fake Herdr 测试，
 不通过运行参数替换正式依赖。
 
-首次连接 Herdr 通常由 hq init 自动完成；单独运行 up 时，调用者必须以 can_manage_staff
-角色精确在岗。经理职责位、runtime sender_label 和运行连续性检查见
-README“首次连接 Herdr”。`
+首次连接 Herdr 由 hq init 自动完成，不能用 up 代替。公司关停后的宿主机冷启动可直接运行 hq up，此路径只恢复
+activation_policy=always 的岗位和 gateway，并要求不可覆盖的 init 完成记录；不能指定单个岗位，
+也不能使用 --no-gateway。公司运行期间从 Herdr 工位执行 up 时，调用者仍必须是 registry 中
+can_manage_staff=true 的精确在岗角色。runtime sender_label 与运行连续性检查见 README“首次连接 Herdr”。`
 	root.AddCommand(
 		upCommand,
 		leaf("patrol", "只读巡视 blocked、编制漂移、orphan 与死亡候选", "patrol"),
@@ -175,16 +176,20 @@ README“首次连接 Herdr”。`
 
 	initCommand := &cobra.Command{
 		Use:   "init <company-directory>",
-		Short: "从空目录创建并首次启动一家虚拟公司",
-		Long: `从模板生成完整、可校验的 HQ 公司实例，并默认通过 Herdr 首次启动。
+		Short: "创建公司，或继续已准备公司的首次初始化",
+		Long: `从模板或已批准的自定义组织规范生成完整、可校验的 HQ 公司实例，并默认通过 Herdr 首次启动。
+
+对已有 config.yaml 的 prepare-only 公司，可只传 company-directory 再次运行 init。HQ 会核验已生成
+的 registry、角色卡与 company-init 决策，然后按原 init 契约续跑；成功后首次初始化通道永久关闭。
 
 交互模式会依次询问公司名、所有者、workspace、组织模板、总裁秘书 slug/显示名、
 Agent 类型和权限模式。
-它只解析这些结构化字段，不连接或调用任何 LLM API。模板生成配置、岗位手册、首份
-公司成立决策和公司本地 hq 二进制；启动后由总裁秘书通过 staff 命令调整编制。
+它只解析这些结构化字段，不连接或调用任何 LLM API。模板或 organization spec 生成配置、
+岗位手册、首份公司成立决策和公司本地 hq 二进制；启动后由总部联系职责位通过 staff 命令调整编制。
 
-自动化使用 --silent：公司名、所有者、workspace 和模板必须显式给出，缺项会在写文件
-前失败。--prepare-only 只生成和校验文件，不连接 Herdr，也不启动 Agent。`,
+
+自动化创建使用 --silent：公司名、所有者、workspace，以及 --template/--organization-spec 二选一必须显式给出，缺项会在写文件
+前失败。--prepare-only 只生成和校验文件，不连接 Herdr，也不启动 Agent；随后用同一个 init 命令完成首次启动。`,
 		Example: `  # 交互式创建并启动
   hq init ./acme
 
@@ -194,16 +199,24 @@ Agent 类型和权限模式。
     --secretary-name liaison --secretary-nickname "总部联络官" \
     --secretary-kind claude --default-agent-kind codex --permission-mode native
 
-  # 离线生成并校验，稍后从秘书工位运行 hq up
+  # 用已批准的第一性原理组织规范直接创建专属公司
+  hq init ./domain-company --silent --company-name "Domain Company" --owner OWNER \
+    --workspace domain-company-hq --organization-spec ./approved-organization.yaml \
+    --default-agent-kind codex --permission-mode native --prepare-only
+
+
+  # 离线生成并校验，稍后在宿主机继续 init
   hq init ./acme --silent --company-name "Acme" --owner ZC \
-    --workspace acme-hq --template minimal --prepare-only`,
+	--workspace acme-hq --template minimal --prepare-only
+  ./acme/ceo-office/tools/hq/bin/hq init ./acme`,
 		Args: leafArgsValidator("init"), RunE: run("init"),
 	}
 	initFlags := initCommand.Flags()
 	initFlags.String("company-name", "", "公司显示名称（--silent 必填）")
 	initFlags.String("owner", "", "公司所有者 principal（--silent 必填）")
 	initFlags.String("workspace", "", "Herdr workspace 小写 slug（--silent 必填）")
-	initFlags.String("template", "", "minimal|product-engineering|saas|professional-services|commerce|virtual-company（--silent 必填）")
+	initFlags.String("template", "", "内置模板；与 --organization-spec 互斥")
+	initFlags.String("organization-spec", "", "已批准的自定义组织规范 YAML；与 --template 互斥")
 	initFlags.String("secretary-name", "secretary", "总裁秘书稳定 slug 的基础名称；角色权限不依赖该名字")
 	initFlags.String("secretary-nickname", "总裁秘书", "总裁秘书显示名称")
 	initFlags.String("secretary-kind", "codex", "总裁秘书使用的 Agent kind")

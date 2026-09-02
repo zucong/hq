@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type initTestEnv struct{ root, office, config, data string }
@@ -22,6 +24,42 @@ type initManifestEntry struct {
 	Mode   fs.FileMode
 	Size   int64
 	SHA256 string
+}
+
+type failOnceInitStartControl struct {
+	*fakeHerdrControl
+	target string
+	failed bool
+}
+
+func (c *failOnceInitStartControl) StartAgent(ctx context.Context, name, kind, paneID string, native []string) HerdrMutationResult {
+	if name == c.target && !c.failed {
+		c.failed = true
+		return HerdrMutationResult{Outcome: herdrDefinitelyNotRun, Err: errors.New("injected init start failure")}
+	}
+	return c.fakeHerdrControl.StartAgent(ctx, name, kind, paneID, native)
+}
+
+func connectInitTestGateway(control *fakeHerdrControl, gateway *fakeGatewayState) {
+	control.onRunPane = func(_ string, command string) {
+		workspaceMarker := "--workspace-id '"
+		workspaceStart := strings.Index(command, workspaceMarker)
+		if workspaceStart < 0 {
+			return
+		}
+		workspaceStart += len(workspaceMarker)
+		workspaceEnd := strings.Index(command[workspaceStart:], "'")
+		serverMarker := "--server-id '"
+		serverStart := strings.Index(command, serverMarker)
+		if workspaceEnd < 0 || serverStart < 0 {
+			return
+		}
+		serverStart += len(serverMarker)
+		serverEnd := strings.Index(command[serverStart:], "'")
+		if serverEnd >= 0 {
+			gateway.setOnline(command[workspaceStart:workspaceStart+workspaceEnd], command[serverStart:serverStart+serverEnd])
+		}
+	}
 }
 
 func newInitTestEnv(t *testing.T) initTestEnv {
@@ -196,6 +234,174 @@ func TestInitAllTemplatesProduceValidRegistries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func writeOrganizationSpecFixture(t *testing.T, directory string) string {
+	t.Helper()
+	path := filepath.Join(directory, "organization.yaml")
+	raw := `version: 1
+id: test-first-principles
+label: Test First-Principles Organization
+departments:
+  - id: ceo-office
+    label: 总裁办
+  - id: delivery
+    label: 交付部
+seats:
+  - id: owner-channel
+    nickname: 总部联系官
+    department: ceo-office
+    reports_to: ""
+    responsibilities: [approval_witness, account_closer, executive_liaison]
+    activation: always
+    keep_warm: ""
+    max_wip: 16
+    runtime_profile: owner_channel
+    permissions: {create: true, issue: true, accept: true, close: true, manage_staff: true, receive_order: true}
+    role:
+      capabilities: [account_closure, approval_witness, organization_operations]
+      mission: 只把人类已经作出的决定转化为可审计组织行动。
+      temperament: 克制、准确、对授权边界敏感。
+      behavior_anchor: AUTHORITY_BEFORE_ACTION
+      duties: [过滤并汇总真正需要所有者决定的重大事项]
+      method: [先按决策权矩阵判断是否应由经理自行决定]
+      evidence: [权威决定原文与范围]
+      boundaries: [不得把日常执行问题升级给所有者]
+  - id: delivery-manager
+    nickname: 交付负责人
+    department: delivery
+    reports_to: owner-channel
+    responsibilities: [manager:delivery]
+    activation: always
+    keep_warm: ""
+    max_wip: 8
+    runtime_profile: default
+    permissions: {create: true, issue: true, accept: true, close: false, manage_staff: false, receive_order: true}
+    role:
+      capabilities: [delivery_management]
+      mission: 在已批准目标内自主拆解、派工、验收与返工。
+      temperament: 清楚、果断、证据导向。
+      behavior_anchor: DELEGATE_BY_CONTRACT
+      duties: [选择并激活直属专业席位]
+      method: [以验收条件而不是过程微操管理员工]
+      evidence: [已验收的下属交付]
+      boundaries: [重大范围变化才升级给所有者]
+  - id: delivery-specialist
+    nickname: 交付专员
+    department: delivery
+    reports_to: delivery-manager
+    responsibilities: [specialist:delivery]
+    activation: on_assignment
+    keep_warm: 30s
+    max_wip: 1
+    runtime_profile: default
+    permissions: {create: false, issue: false, accept: true, close: false, manage_staff: false, receive_order: true}
+    role:
+      capabilities: [evidence_delivery]
+      mission: 按冻结合同完成工作并提交可复核证据。
+      temperament: 专注、诚实、可复核。
+      behavior_anchor: EVIDENCE_BEFORE_REPORT
+      duties: [执行正式 assignment]
+      method: [先核对合同再行动]
+      evidence: [可读取 artifact 与验证结果]
+      boundaries: [不得把裸 prompt 当成任务]
+`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestInitOrganizationSpecCreatesCustomRoleCardsAndFormationEvidence(t *testing.T) {
+	e := newInitTestEnv(t)
+	specPath := writeOrganizationSpecFixture(t, filepath.Dir(e.root))
+	args := []string{"init", e.root, "--silent", "--company-name", "Spec Company", "--owner", "ZC", "--workspace", "spec-company-hq", "--organization-spec", specPath, "--prepare-only", "--permission-mode", "native"}
+	var out, errOut bytes.Buffer
+	if err := execute(args, &out, &errOut); err != nil {
+		t.Fatalf("organization-spec init failed: %v\nstderr=%s\nstdout=%s", err, errOut.String(), out.String())
+	}
+	cfg, err := loadConfig(e.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents) != 3 || len(cfg.RoleCards) != 3 {
+		t.Fatalf("custom registry agents=%d cards=%d", len(cfg.Agents), len(cfg.RoleCards))
+	}
+	liaison := initRuleByRole(t, cfg, roleApprovalWitness)
+	manager := initRuleByRole(t, cfg, "manager:delivery")
+	worker := initRuleByRole(t, cfg, "specialist:delivery")
+	if liaison.Name != scopedAgentName("spec-company-hq", "owner-channel") || manager.ReportsTo != liaison.Name || worker.ReportsTo != manager.Name {
+		t.Fatalf("custom hierarchy liaison=%+v manager=%+v worker=%+v", liaison, manager, worker)
+	}
+	if liaison.ActivationPolicy != activationAlways || manager.ActivationPolicy != activationAlways || worker.ActivationPolicy != activationOnAssignment || worker.MaxWIP != 1 {
+		t.Fatalf("custom activation mismatch: %+v %+v %+v", liaison, manager, worker)
+	}
+	manualRaw, err := os.ReadFile(filepath.Join(e.root, manager.ManualPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"在已批准目标内自主拆解", "重大范围变化才升级给所有者", "DELEGATE_BY_CONTRACT"} {
+		if !strings.Contains(string(manualRaw), fragment) {
+			t.Fatalf("custom manager manual missing %q:\n%s", fragment, manualRaw)
+		}
+	}
+	formationSpec := filepath.Join(e.office, "formation", "organization-spec.yaml")
+	wantRaw, _ := os.ReadFile(specPath)
+	gotRaw, err := os.ReadFile(formationSpec)
+	if err != nil || !bytes.Equal(gotRaw, wantRaw) {
+		t.Fatalf("formation evidence mismatch err=%v", err)
+	}
+	assertNoParallelOrganizationRoster(t, initTreeManifest(t, e.root))
+	if err := validateRegistryManuals(cfg, e.root); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "source=organization-spec:test-first-principles") {
+		t.Fatalf("init output did not identify source: %s", out.String())
+	}
+}
+
+func TestInitOrganizationSpecIsExclusiveAndFailsBeforeWriting(t *testing.T) {
+	e := newInitTestEnv(t)
+	specPath := writeOrganizationSpecFixture(t, filepath.Dir(e.root))
+	args := []string{"init", e.root, "--silent", "--company-name", "Spec Company", "--owner", "ZC", "--workspace", "spec-company-hq", "--template", "minimal", "--organization-spec", specPath, "--prepare-only"}
+	var out bytes.Buffer
+	err := execute(args, &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "互斥") {
+		t.Fatalf("err=%v out=%s", err, out.String())
+	}
+	if _, statErr := os.Lstat(e.root); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("exclusive-source failure wrote target: %v", statErr)
+	}
+}
+
+func TestInitOrganizationSpecRejectsSymlinkBeforeWriting(t *testing.T) {
+	e := newInitTestEnv(t)
+	realSpec := writeOrganizationSpecFixture(t, filepath.Dir(e.root))
+	symlink := filepath.Join(filepath.Dir(e.root), "organization-link.yaml")
+	if err := os.Symlink(realSpec, symlink); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"init", e.root, "--silent", "--company-name", "Spec Company", "--owner", "OWNER", "--workspace", "spec-company-hq", "--organization-spec", symlink, "--prepare-only"}
+	var out bytes.Buffer
+	err := execute(args, &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "non symlink") && !strings.Contains(err.Error(), "非 symlink") {
+		t.Fatalf("err=%v out=%s", err, out.String())
+	}
+	if _, statErr := os.Lstat(e.root); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("symlink spec failure wrote target: %v", statErr)
+	}
+}
+
+func TestOrganizationSpecExampleCompiles(t *testing.T) {
+	opts := initOptions{CompanyName: "Example", Owner: "OWNER", Workspace: "example-hq",
+		OrganizationSpec: "organization-spec.example.yaml", SecretaryKind: "codex", DefaultAgentKind: "codex", PermissionMode: "native"}
+	compiled, err := loadAndCompileOrganizationSpec(opts.OrganizationSpec, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.Spec.ID != "example-domain-organization" || len(compiled.Config.Agents) != 3 || len(compiled.Profiles) != 3 {
+		t.Fatalf("compiled example=%+v", compiled)
 	}
 }
 
@@ -516,19 +722,9 @@ func TestInitInteractiveWizardAndHelp(t *testing.T) {
 func TestInitDefaultStartsSecretaryThenGatewayThenRoster(t *testing.T) {
 	e := newInitTestEnv(t)
 	control := newFakeHerdrControl(e.root, "test-company-hq")
+	control.snapshot.Workspaces = nil
 	gateway := &fakeGatewayState{health: GatewayHealth{Error: "offline"}}
-	control.onRunPane = func(_ string, command string) {
-		marker := "--server-id '"
-		start := strings.Index(command, marker)
-		if start < 0 {
-			return
-		}
-		start += len(marker)
-		end := strings.Index(command[start:], "'")
-		if end >= 0 {
-			gateway.setOnline("w-test", command[start:start+end])
-		}
-	}
+	connectInitTestGateway(control, gateway)
 	var out bytes.Buffer
 	app, _ := newInitApp(globalOptions{}, &out, &out)
 	app.Herdr, app.GatewayHealth = control, gateway
@@ -547,6 +743,180 @@ func TestInitDefaultStartsSecretaryThenGatewayThenRoster(t *testing.T) {
 	}
 	if strings.Contains(joined, "--approve-for-me") || !strings.Contains(out.String(), "公司已建立并启动") {
 		t.Fatalf("startup incomplete:\n%s\n%s", joined, out.String())
+	}
+}
+
+func TestPreparedCompanyResumesWithInitAndWritesPermanentCompletion(t *testing.T) {
+	e := newInitTestEnv(t)
+	var out bytes.Buffer
+	prepare, _ := newInitApp(globalOptions{}, &out, &out)
+	if err := prepare.cmdInit([]string{"--silent", "--company-name", "Test Company", "--owner", "ZC", "--workspace", "test-company-hq", "--template", "minimal", "--prepare-only", e.root}); err != nil {
+		t.Fatal(err)
+	}
+	control := newFakeHerdrControl(e.root, "test-company-hq")
+	control.snapshot.Workspaces = nil
+	gateway := &fakeGatewayState{health: GatewayHealth{Error: "offline"}}
+	connectInitTestGateway(control, gateway)
+	app, _ := newInitApp(globalOptions{}, &out, &out)
+	app.Herdr, app.GatewayHealth = control, gateway
+	if err := app.cmdInit([]string{e.root}); err != nil {
+		t.Fatalf("resume init: %v\n%s", err, out.String())
+	}
+	completion := filepath.Join(e.data, "init", "completed.json")
+	if info, err := os.Stat(completion); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("completion missing or wrong mode: info=%v err=%v", info, err)
+	}
+	control.mu.Lock()
+	callCount := len(control.calls)
+	control.mu.Unlock()
+	out.Reset()
+	if err := app.cmdInit([]string{e.root}); err != nil {
+		t.Fatal(err)
+	}
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.calls) != callCount {
+		t.Fatalf("completed init mutated Herdr again: before=%d after=%d", callCount, len(control.calls))
+	}
+	if !strings.Contains(out.String(), "首次初始化早已完成") || !strings.Contains(out.String(), "hq up") {
+		t.Fatalf("completed init guidance missing: %s", out.String())
+	}
+}
+
+func TestInitFailureResumesOnlyUnderFrozenContract(t *testing.T) {
+	e := newInitTestEnv(t)
+	base := newFakeHerdrControl(e.root, "test-company-hq")
+	base.snapshot.Workspaces = nil
+	manager := scopedAgentName("test-company-hq", "delivery-manager")
+	control := &failOnceInitStartControl{fakeHerdrControl: base, target: manager}
+	gateway := &fakeGatewayState{health: GatewayHealth{Error: "offline"}}
+	connectInitTestGateway(base, gateway)
+	var out bytes.Buffer
+	app, _ := newInitApp(globalOptions{}, &out, &out)
+	app.Herdr, app.GatewayHealth = control, gateway
+	args := []string{"--silent", "--company-name", "Test Company", "--owner", "ZC", "--workspace", "test-company-hq", "--template", "minimal", e.root}
+	if err := app.cmdInit(args); err == nil || !strings.Contains(err.Error(), "injected init start failure") {
+		t.Fatalf("expected partial init failure, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.data, "init", "intent.json")); err != nil {
+		t.Fatalf("durable intent missing after partial failure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.data, "init", "completed.json")); !os.IsNotExist(err) {
+		t.Fatalf("partial failure unexpectedly completed: %v", err)
+	}
+	// Model a real agent CLI self-update/restart boundary: the session start is
+	// durable and its tab remains, but the recorded agent incarnation is gone.
+	base.mu.Lock()
+	base.snapshot.Agents = nil
+	base.mu.Unlock()
+	if err := app.cmdInit([]string{e.root}); err != nil {
+		t.Fatalf("same-contract retry did not converge: %v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.data, "init", "completed.json")); err != nil {
+		t.Fatalf("retry did not complete: %v", err)
+	}
+	sessions, err := (&FileSessionStore{Root: filepath.Join(e.data, "sessions")}).List(SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenStopped := false
+	for _, event := range sessions {
+		seenStopped = seenStopped || event.Type == sessionStopped
+	}
+	if !seenStopped || !strings.Contains(out.String(), "回收 stale tab") {
+		t.Fatalf("disappeared init incarnation was not reconciled: sessions=%+v out=%s", sessions, out.String())
+	}
+}
+
+func TestInitFailureRejectsChangedFrozenContract(t *testing.T) {
+	e := newInitTestEnv(t)
+	base := newFakeHerdrControl(e.root, "test-company-hq")
+	base.snapshot.Workspaces = nil
+	manager := scopedAgentName("test-company-hq", "delivery-manager")
+	control := &failOnceInitStartControl{fakeHerdrControl: base, target: manager}
+	gateway := &fakeGatewayState{health: GatewayHealth{Error: "offline"}}
+	connectInitTestGateway(base, gateway)
+	var out bytes.Buffer
+	app, _ := newInitApp(globalOptions{}, &out, &out)
+	app.Herdr, app.GatewayHealth = control, gateway
+	args := []string{"--silent", "--company-name", "Test Company", "--owner", "ZC", "--workspace", "test-company-hq", "--template", "minimal", e.root}
+	if err := app.cmdInit(args); err == nil {
+		t.Fatal("expected injected partial failure")
+	}
+	original, err := os.ReadFile(e.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.config, append(append([]byte(nil), original...), '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = app.cmdInit([]string{e.root})
+	if err == nil || !strings.Contains(err.Error(), "init intent 与当前配置或公司成立决策不一致") {
+		t.Fatalf("changed frozen contract was not rejected: %v", err)
+	}
+}
+
+func TestUpRequiresCompletedInitAndHostColdStartRestoresAlwaysRoles(t *testing.T) {
+	e := newInitTestEnv(t)
+	var out bytes.Buffer
+	prepare, _ := newInitApp(globalOptions{}, &out, &out)
+	if err := prepare.cmdInit([]string{"--silent", "--company-name", "Test Company", "--owner", "ZC", "--workspace", "test-company-hq", "--template", "minimal", "--prepare-only", e.root}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(e.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstarted := &App{DataDir: e.data, HQRoot: e.root, Config: cfg}
+	if err := unstarted.requireCompletedInit(); err == nil || !strings.Contains(err.Error(), "hq init") {
+		t.Fatalf("prepared company was allowed through up gate: %v", err)
+	}
+
+	control := newFakeHerdrControl(e.root, cfg.WorkspaceLabel)
+	control.snapshot.Workspaces = nil
+	gateway := &fakeGatewayState{health: GatewayHealth{Error: "offline"}}
+	connectInitTestGateway(control, gateway)
+	initApp, _ := newInitApp(globalOptions{}, &out, &out)
+	initApp.Herdr, initApp.GatewayHealth = control, gateway
+	if err := initApp.cmdInit([]string{e.root}); err != nil {
+		t.Fatal(err)
+	}
+	control.mu.Lock()
+	control.snapshot.Workspaces, control.snapshot.Tabs, control.snapshot.Panes, control.snapshot.Agents = nil, nil, nil, nil
+	control.mu.Unlock()
+	gateway.mu.Lock()
+	gateway.health = GatewayHealth{Error: "offline"}
+	gateway.mu.Unlock()
+	app, err := newAppWithDependencies(runtimePaths{Office: e.office, HQRoot: e.root, DataDir: e.data, ConfigPath: e.config, HerdrBin: "fake-herdr"}, cfg, globalOptions{}, AppDependencies{
+		Store: NewStore(e.data), Identity: &fakeIdentityProvider{}, Transport: &fakeTransport{}, Herdr: control,
+		GatewayHealth: gateway, Sessions: &FileSessionStore{Root: filepath.Join(e.data, "sessions")}, Clock: time.Now, Sleep: time.Sleep,
+	}, &out, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.ProductionRuntime = true
+	t.Setenv("HERDR_ENV", "")
+	if err := app.run([]string{"up"}); err != nil {
+		t.Fatalf("host cold up: %v\n%s", err, out.String())
+	}
+	if !app.HostColdStart || !strings.Contains(out.String(), "HQ 冷启动完成") {
+		t.Fatalf("host cold path not used: host=%v out=%s", app.HostColdStart, out.String())
+	}
+	snapshot, err := control.Snapshot(context.Background(), HerdrSnapshotScope{WorkspaceLabel: cfg.WorkspaceLabel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range cfg.Agents {
+		if rule.ActivationPolicy != activationAlways || rule.Disabled {
+			continue
+		}
+		found := false
+		for _, agent := range snapshot.Agents {
+			found = found || agent.Name == rule.Name
+		}
+		if !found {
+			t.Fatalf("cold up did not restore %s", rule.Name)
+		}
 	}
 }
 

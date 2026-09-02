@@ -138,7 +138,9 @@ TMPDIR="$HQ_TEST_ROOT/tmp" GOCACHE="$HQ_TEST_ROOT/go-cache" \
 ## 初始化公司
 
 `hq init <company-directory>` 是唯一初始化入口。它不连接 LLM API；交互向导只读取结构化字段，
-从 6 个内置模板中生成公司。默认生成后通过 Herdr 首次启动，`--prepare-only` 用于离线准备：
+可以从内置模板生成通用公司，也可以用一份已批准的 `--organization-spec` 从第一性原理编译专属公司。
+默认生成后通过 Herdr 首次启动，`--prepare-only` 用于离线准备。prepare-only 目录仍未完成 init，
+稍后只传同一个 company-directory 再运行 `init` 即可继续；不要用 `up` 代替首次初始化：
 
 ```bash
 HQ_COMPANY_ROOT=/path/to/company
@@ -148,6 +150,12 @@ HQ_COMPANY_ROOT=/path/to/company
 ./bin/hq init "$HQ_COMPANY_ROOT" --silent \
   --company-name "Acme" --owner ZC --workspace acme-hq \
   --template product-engineering --secretary-kind claude \
+  --default-agent-kind codex --permission-mode native --prepare-only
+
+# 专属组织：不先套模板，也不保留模板角色兼容层
+./bin/hq init "$HQ_COMPANY_ROOT" --silent \
+  --company-name "Domain Company" --owner OWNER --workspace domain-company-hq \
+  --organization-spec ./approved-company-formation.yaml \
   --default-agent-kind codex --permission-mode native --prepare-only
 
 # 推荐的虚拟公司总部
@@ -167,6 +175,9 @@ HQ_COMPANY_ROOT=/path/to/company
   --default-agent-arg=-c --default-agent-arg='model_reasoning_effort="medium"' \
   --default-agent-arg=--sandbox --default-agent-arg=danger-full-access \
   --default-agent-arg=--ask-for-approval --default-agent-arg=never --prepare-only
+
+# 对上述任一 prepare-only 公司完成首次初始化
+"$HQ_COMPANY_ROOT/ceo-office/tools/hq/bin/hq" init "$HQ_COMPANY_ROOT"
 ```
 
 模板为 `minimal`、`product-engineering`、`saas`、`professional-services`、`commerce` 和
@@ -174,6 +185,15 @@ HQ_COMPANY_ROOT=/path/to/company
 应用开发、安全、代码审查、浏览器黑盒、首次使用、可用性走查和数据核验门禁十个专业 seat。
 管理层使用 `activation_policy=always`；专业下属使用 `on_assignment`、`max_wip=1`
 和默认 `keep_warm=30s`，由正式 issue 激活，工作终态后在无待处理工作时自动休眠。
+
+自定义 organization spec 使用严格单文档 YAML，`version: 1`。它显式列出部门和 seat；每个 seat
+同时冻结 nickname、department、reports_to、唯一 responsibilities、activation/keep_warm/max_wip、
+`owner_channel|default` runtime profile、权限，以及结构化 Role Card 的 capabilities、mission、
+temperament、behavior anchor、duties、method、evidence 和 boundaries。HQ 在写目标目录前检查未知字段、
+重复项、汇报环、唯一职责位、权限组合、工位路径和全部 digest。规范原文会复制到
+`ceo-office/formation/organization-spec.yaml` 并绑定公司成立决策，作为不可变成立证据；运行时不读取它，
+`ceo-office/tools/hq/config.yaml` 仍是唯一实时组织注册表，因此该文件不是第二份 roster。
+完整的通用 schema 示例见 [`organization-spec.example.yaml`](organization-spec.example.yaml)；它只演示格式和最小治理不变量，不代表任何具体公司的组织模板。
 
 每个模板都包含真实汇报线、根目录 `AGENT-HANDBOOK.md`，以及每个 seat 独立的
 `<department>/staff/<seat>/v<role-version>/AGENTS.md`。`ceo-office/tools/hq/config.yaml`
@@ -183,8 +203,9 @@ digest 和 employee seat digest，再写入单一当前 registry schema。init �
 并把执行 init 的当前 HQ executable 复制为 `ceo-office/tools/hq/bin/hq`（0755）。文件使用非覆盖创建语义；同参数
 重复运行会续跑或 no-op，不同参数不会覆盖既有公司。
 
-`--silent` 绝不读取 stdin，且要求显式给出 `--company-name`、`--owner`、`--workspace` 和
-`--template`。`--permission-mode yolo` 使用 HQ 针对 Agent kind 的自动批准参数；`native` 不追加
+`--silent` 绝不读取 stdin，且要求显式给出 `--company-name`、`--owner`、`--workspace`，并在
+`--template` 与 `--organization-spec` 中恰好选择一个。两者互斥，HQ 不会先生成模板再覆盖为专属组织。
+`--permission-mode yolo` 使用 HQ 针对 Agent kind 的自动批准参数；`native` 不追加
 批准参数。可选的 `--secretary-name` 设置总裁秘书稳定 slug 的基础名称，`--secretary-nickname` 设置显示名称；
 两者都不承载权限，权限只来自该 employee seat 的唯一 `approval_witness` 职责和显式 `can_*` flags。
 可重复的 `--secretary-agent-arg` 和 `--default-agent-arg` 会分别把秘书/其他岗位的
@@ -332,23 +353,33 @@ role card 一旦创建就不得原地修改；新定义使用新 version。仍�
 
 ## 首次连接 Herdr
 
-`hq up` 会创建或复用目标 workspace/tab，启动 registry 中 `activation_policy=always` 的 agent，并确保本地 gateway 在线。
+首次连接只能由 `hq init` 完成。init 在任何 Herdr mutation 前核验：成立决策只有一个精确的
+`company:init` scope、业务账本与 session lifecycle 为空、同名 workspace 不存在。随后先落盘冻结的
+`records/init/intent.json`，再按“总部联系职责位 → 回收 Herdr 自动创建的空 root tab → gateway → 其余 always 岗位”启动。中途失败时，
+重跑同一个 `hq init <company-directory>` 只允许在配置、成立决策和已产生运行态均与 intent 一致时续跑；
+若已记账的 init agent incarnation 已从 snapshot 消失，HQ 会先补写 `stopped` 并回收其精确 stale tab，
+再创建新 incarnation，而不是复用旧 session 或留下重复工位。
+成功后写入不可覆盖的 `records/init/completed.json`，并永久关闭首次初始化通道。
+
+`hq up` 只服务已经完成 init 的公司：它创建或复用目标 workspace/tab，启动 registry 中
+`activation_policy=always` 的 agent，并确保本地 gateway 在线。
 显式 `hq up <on_assignment-seat>` 会被拒绝：这类 seat 只能在 durable `issue` 已建立后由 HQ 自动
 cold-resume，防止先启动再用口头 prompt 绕过 Assignment Contract。
-通常由 `hq init` 自动完成首次引导：先启动总裁秘书，以秘书的稳定 pane 建立 gateway，再启动
-模板中的其余成员。使用 `--prepare-only` 或维护既有公司时，`hq up` 仍要求：
+
+公司全部关停后，可从宿主机直接运行无参数的 `hq up`。该冷启动入口必须验证 init 完成记录，且只恢复
+gateway 和 `always` 岗位；它拒绝单 agent 参数、`--no-gateway` 和 `--direct`。这解决了“联络官必须先在线
+才能把自己启动”的循环依赖，但不授予业务写权限。公司正在运行时，从 Herdr 工位执行 `up` 仍要求调用者
+是 registry 中精确在岗、未停用且 `can_manage_staff=true` 的角色。
 
 `hq up --no-gateway <agent>` 是严格的 agent-only 恢复入口，只复用已经存在且精确匹配的 workspace；
-它不会创建 workspace 或 gateway。delivery cold-resume 使用同一边界。
+它不会创建 workspace 或 gateway，只能由上述实时在岗运维角色使用。delivery cold-resume 使用同一边界。
 
-1. 操作者已在目标 `workspace_label` 中以已登记、未停用且具有 `can_manage_staff=true` 的身份在岗；
-2. `hq up` 从已登记的总裁秘书或其他 `can_manage_staff=true` 工位执行；
-3. 部门经理声明正确的 `manager:<department>`；
-4. tab 的 label 精确使用 registry 的 runtime `sender_label`；
-5. agent cwd、kind、workspace、tab、pane 和 `interactive_ready` 均能由 Herdr snapshot 证明。
+所有启动路径仍要求部门经理声明正确的 `manager:<department>`，tab label 精确使用 registry 的 runtime `sender_label`，
+且 agent cwd、kind、workspace、tab、pane 和 `interactive_ready` 均能由 Herdr snapshot 证明。
 
 ```bash
 HQ_COMPANY_ROOT=/path/to/company
+"$HQ_COMPANY_ROOT/ceo-office/tools/hq/bin/hq" init "$HQ_COMPANY_ROOT" # 仅首次；prepare-only 后也用它
 "$HQ_COMPANY_ROOT/ceo-office/tools/hq/bin/hq" \
   --office "$HQ_COMPANY_ROOT/ceo-office" up
 "$HQ_COMPANY_ROOT/ceo-office/tools/hq/bin/hq" \
@@ -775,7 +806,8 @@ registry 和空的 v3 ledger 开始。
   创建及直接 `serve` 另需 control-plane admission，active ESTOP 下不能借豁免经理启动顺带恢复 gateway；
 - config、records、岗位手册和引用必须位于允许的 canonical 根，拒绝 symlink 与类型混淆；
 - 长文只保存 canonical 文件或 Git commit 引用，事件拒绝疑似密钥、Cookie、口令和金额；
-- `--direct` 只开放给实时在岗的 `can_manage_staff` 角色处理运维白名单，不授予业务写权限。
+- `--direct` 只开放给实时在岗的 `can_manage_staff` 角色处理运维白名单，不授予业务写权限；已完成 init 的
+  公司从宿主机执行无参数 `hq up` 是单独的冷启动路径，明确拒绝 `--direct`。
 
 HQ 的信任模型用于防误操作、保证流程一致性和提供可审计恢复，不是同一 OS 用户内的敌对安全边界。
 当前 socket 调用者提供的 pane identity 只能与 Herdr snapshot 交叉核对，不能以密码学方式证明调用进程拥有该 pane；

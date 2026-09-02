@@ -51,6 +51,9 @@ func (a *App) runUp(args []string) error {
 	if fs.NArg() > 1 {
 		return fmt.Errorf("用法：hq up [agent]")
 	}
+	if a.HostColdStart && (fs.NArg() != 0 || *noGateway) {
+		return fmt.Errorf("宿主机冷启动只接受无位置参数、无 --no-gateway 的 hq up；它只恢复 registry 中的 always 岗位和 gateway")
+	}
 	if a.Herdr == nil {
 		return fmt.Errorf("Herdr control 未注入，拒绝 PATH 回落")
 	}
@@ -79,6 +82,14 @@ func (a *App) runUp(args []string) error {
 		requests = append(requests, RuntimeAdmissionRequest{Action: runtimeAdmissionControlPlane, Target: a.Config.WorkspaceLabel})
 	}
 	_, err = a.withRuntimeAdmissions(requests, func() error {
+		if a.HostColdStart {
+			workspaceID, startErr := a.startCompanyControlPlane(context.Background(), "hq-up-host")
+			if startErr != nil {
+				return startErr
+			}
+			_, writeErr := fmt.Fprintf(a.Out, "HQ 冷启动完成：always 岗位已收敛，gateway 在线；workspace=%s 配置=%s\n", workspaceID, a.ConfigPath)
+			return writeErr
+		}
 		return a.runUpAdmitted(desired, *noGateway)
 	})
 	return err

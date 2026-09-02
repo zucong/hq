@@ -61,7 +61,10 @@ Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册�
 
 ## 首次启动失败处置
 
-- 在任何业务事件写入前失败：保留失败证据，修复当前代码或模板后，在新空目录重新 `hq init`；
+- 在任何业务事件写入前失败且已有 `records/init/intent.json`：保留失败证据，恢复 intent 所冻结的配置与
+  成立决策，然后对同一 company-directory 重跑 `hq init`；HQ 只续跑可证明属于本次 init 的缺失步骤；
+  已消失的 init agent incarnation 会先记 `stopped` 并回收其精确 stale tab；
+- 尚未写 init intent 就失败：修复静态输入后，可在同一目录用相同成立参数重跑 `hq init`；
 - 已有业务事件后失败：停止 gateway/writer，保留完整实例，使用同一 v3 协议的当前工具执行
   `doctor`、投递核对和 forward recovery；
 - 任何路径都不得就地截断、删除、重签或手工改写 event v3 链。

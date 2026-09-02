@@ -94,6 +94,7 @@ type HerdrTab struct {
 	WorkspaceID string `json:"workspace_id"`
 	Label       string `json:"label"`
 	CWD         string `json:"cwd"`
+	Number      int    `json:"number,omitempty"`
 }
 
 type HerdrPane struct {
@@ -418,7 +419,7 @@ func validateHerdrSnapshot(snapshot HerdrSnapshot, scope HerdrSnapshotScope) err
 		if !knownWorkspaces[tab.WorkspaceID] {
 			return fmt.Errorf("herdr snapshot tab %q workspace_id=%q 归属不明", tab.ID, tab.WorkspaceID)
 		}
-		if err := check("tab", tab.ID, tab.WorkspaceID+"\x00"+tab.Label+"\x00"+tab.CWD); err != nil {
+		if err := check("tab", tab.ID, fmt.Sprintf("%s\x00%s\x00%s\x00%d", tab.WorkspaceID, tab.Label, tab.CWD, tab.Number)); err != nil {
 			return err
 		}
 		tabs[tab.ID] = tab

@@ -20,6 +20,7 @@ import (
 
 type fakeHerdrControl struct {
 	mu             sync.Mutex
+	root           string
 	snapshot       HerdrSnapshot
 	snapshots      []HerdrSnapshot
 	calls          []string
@@ -106,6 +107,7 @@ func (f *fakeGatewayState) setOnline(workspace, server string) {
 
 func newFakeHerdrControl(root, label string) *fakeHerdrControl {
 	return &fakeHerdrControl{
+		root:     root,
 		snapshot: HerdrSnapshot{Workspaces: []HerdrWorkspace{{ID: "w-test", Label: label}}},
 		nextID:   1, createMutates: true, startMutates: true, closeMutates: true,
 	}
@@ -158,6 +160,10 @@ func (f *fakeHerdrControl) CreateWorkspace(ctx context.Context, label string) (H
 	f.nextID++
 	if f.createMutates {
 		f.snapshot.Workspaces = append(f.snapshot.Workspaces, workspace)
+		rootTab := HerdrTab{ID: workspace.ID + ":root", WorkspaceID: workspace.ID, Label: "1", CWD: f.root, Number: 1}
+		rootPane := HerdrPane{ID: workspace.ID + ":root-pane", WorkspaceID: workspace.ID, TabID: rootTab.ID, CWD: f.root}
+		f.snapshot.Tabs = append(f.snapshot.Tabs, rootTab)
+		f.snapshot.Panes = append(f.snapshot.Panes, rootPane)
 	}
 	result := f.createOutcome
 	if result.Outcome == "" {

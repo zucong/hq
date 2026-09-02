@@ -105,11 +105,27 @@ registry 固定为 `ceo-office/tools/hq/config.yaml`，业务数据固定为 `ce
 DeliveryTransport 和 fake Herdr。
 
 `hq init <company-directory>` 是唯一公司初始化入口。它不调用 LLM，而是把交互式字段或 `--silent`
-参数编译成同一份确定性 init plan。plan 从 `minimal`、`product-engineering`、`saas`、
-`professional-services`、`commerce`、`virtual-company` 中选择模板，生成严格 registry、固定岗位手册、公司成立决策和
-公司本地 binary。默认引导顺序是“总裁秘书 → gateway → 其余编制”；`--prepare-only` 不连接 Herdr。
-同参数重跑只续跑缺失步骤，不同参数拒绝覆盖既有公司。
+参数编译成同一份确定性 init plan。通用组织可从 `minimal`、`product-engineering`、`saas`、
+`professional-services`、`commerce`、`virtual-company` 中选择模板；专属组织用严格 YAML
+`--organization-spec` 直接编译，不能与模板同时使用，也不会先创建模板角色再覆盖。两条路径都生成严格
+registry、固定岗位手册、公司成立决策和公司本地 binary。默认引导顺序是“总部联系职责位 → gateway →
+其余 always 编制”；`--prepare-only` 不连接 Herdr。prepare-only 目录仍由同一个 `init` 命令完成首次启动，
+不增加第三个公开命令，也不允许 `up` 代替 init。
+
+首次启动是内部的一次性 init lifecycle。HQ 在 Herdr mutation 前要求精确的 `company:init` 决策、空业务账本、
+空 session lifecycle 和不存在同名 workspace，然后以不可覆盖的 `intent.json` 冻结 config/decision digest。
+失败续跑只接受同一 intent 产生的 workspace、always agent/session 和 gateway；配置或成立授权改变时 fail closed。
+Herdr 创建 workspace 时自带的 1 号空 root tab 会在总部联系职责位精确在岗后被回收。若 init session 已记账、
+但 snapshot 证明对应 agent incarnation 消失，HQ 先追加 `stopped` 并回收仍满足原 seat 合同的 stale tab，
+然后才启动新 incarnation；不会把同名 agent 当作同一 session。
+全部 always 岗位与 gateway 收敛后才写不可覆盖的 `completed.json`，以后 `init` 不再改变运行态。
 公司本地 binary 使实例不依赖源码目录或全局安装的 `hq`；Herdr 与所选 Agent CLI 仍是明确的外部运行依赖。
+
+organization spec v1 显式冻结部门、seat、汇报线、职责、激活与容量、runtime profile、权限和结构化 Role Card。
+HQ 在任何目标写入前严格拒绝未知字段、多个 YAML 文档、JSON、symlink、重复/冲突 seat、汇报环、非法职责、
+缺失唯一治理职责、无效激活和权限组合。每个 seat 编译为独立 `AGENTS.md`、Role Card digest 和 Employee Seat
+digest。原始规范按字节保存为 `ceo-office/formation/organization-spec.yaml`，其 SHA-256 进入成立决策；它仅是
+formation evidence，不是 live registry，运行时与后续 staff mutation 只认 `config.yaml`。
 
 ## 6. 命令模型
 
@@ -144,6 +160,11 @@ temporarily unavailable 和 internal 的原始退出类别。纯参数错误必�
 `up`、`serve`、`rebuild`、`reconcile`、`board --reindex`、`index rebuild` 和 `estop`。
 它不是通用权限提升，也不能执行 case/approval/issue/message/report/accept/return/close 或 staff mutation。
 `delivery resolve` 是带外部证据的业务恢复动作，仍经 gateway 核验调用者身份。
+
+唯一例外不是 `--direct`：公司已存在有效 init completion 且当前不在 Herdr 内时，无参数 `hq up` 可作为
+宿主机冷启动入口。它只能恢复 gateway 与当前 registry 的 always 岗位，拒绝指定 seat 或 `--no-gateway`；
+公司运行态中的 `up` 仍逐次核验实时 `can_manage_staff` 身份。这把 OS 运维启动与公司业务授权分开，同时消除
+“联络官必须已经在线才能启动联络官”的循环依赖。
 
 ### Project 可见性投影
 
