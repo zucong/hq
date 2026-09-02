@@ -367,9 +367,11 @@ role card 一旦创建就不得原地修改；新定义使用新 version。仍�
 cold-resume，防止先启动再用口头 prompt 绕过 Assignment Contract。
 
 公司全部关停后，可从宿主机直接运行无参数的 `hq up`。该冷启动入口必须验证 init 完成记录，且只恢复
-gateway 和 `always` 岗位；它拒绝单 agent 参数、`--no-gateway` 和 `--direct`。这解决了“联络官必须先在线
-才能把自己启动”的循环依赖，但不授予业务写权限。公司正在运行时，从 Herdr 工位执行 `up` 仍要求调用者
-是 registry 中精确在岗、未停用且 `can_manage_staff=true` 的角色。
+gateway 和 `always` 岗位；启动新 incarnation 前，它会用当前 Herdr snapshot 证明旧 runtime 已消失，逐一为
+仍记作 active 的历史 session 补写 `stopped`，不会复用旧 session 或把旧、新工位混为同一次运行。它拒绝
+单 agent 参数、`--no-gateway` 和 `--direct`。这解决了“联络官必须先在线才能把自己启动”的循环依赖，但不
+授予业务写权限。公司正在运行时，从 Herdr 工位执行 `up` 仍要求调用者是 registry 中精确在岗、未停用且
+`can_manage_staff=true` 的角色。
 
 `hq up --no-gateway <agent>` 是严格的 agent-only 恢复入口，只复用已经存在且精确匹配的 workspace；
 它不会创建 workspace 或 gateway，只能由上述实时在岗运维角色使用。delivery cold-resume 使用同一边界。

@@ -163,8 +163,9 @@ temporarily unavailable 和 internal 的原始退出类别。纯参数错误必�
 
 唯一例外不是 `--direct`：公司已存在有效 init completion 且当前不在 Herdr 内时，无参数 `hq up` 可作为
 宿主机冷启动入口。它只能恢复 gateway 与当前 registry 的 always 岗位，拒绝指定 seat 或 `--no-gateway`；
-公司运行态中的 `up` 仍逐次核验实时 `can_manage_staff` 身份。这把 OS 运维启动与公司业务授权分开，同时消除
-“联络官必须已经在线才能启动联络官”的循环依赖。
+恢复前先以当前 Herdr snapshot 收敛已消失的 active session，为每个旧 incarnation 追加 `stopped`，再为新
+workspace/runtime 写入新的 `started`。公司运行态中的 `up` 仍逐次核验实时 `can_manage_staff` 身份。这把
+OS 运维启动与公司业务授权分开，同时消除“联络官必须已经在线才能启动联络官”的循环依赖。
 
 ### Project 可见性投影
 

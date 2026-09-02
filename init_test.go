@@ -881,6 +881,14 @@ func TestUpRequiresCompletedInitAndHostColdStartRestoresAlwaysRoles(t *testing.T
 	if err := initApp.cmdInit([]string{e.root}); err != nil {
 		t.Fatal(err)
 	}
+	initialSessions, err := (&FileSessionStore{Root: filepath.Join(e.data, "sessions")}).List(SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialActive := activeSessionStarts(initialSessions)
+	if len(initialActive) == 0 {
+		t.Fatal("first init did not create any active sessions")
+	}
 	control.mu.Lock()
 	control.snapshot.Workspaces, control.snapshot.Tabs, control.snapshot.Panes, control.snapshot.Agents = nil, nil, nil, nil
 	control.mu.Unlock()
@@ -901,6 +909,21 @@ func TestUpRequiresCompletedInitAndHostColdStartRestoresAlwaysRoles(t *testing.T
 	}
 	if !app.HostColdStart || !strings.Contains(out.String(), "HQ 冷启动完成") {
 		t.Fatalf("host cold path not used: host=%v out=%s", app.HostColdStart, out.String())
+	}
+	sessions, err := (&FileSessionStore{Root: filepath.Join(e.data, "sessions")}).List(SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostStops := map[string]bool{}
+	for _, event := range sessions {
+		if event.Type == sessionStopped && event.Actor == "hq-up-host" {
+			hostStops[event.SessionID] = true
+		}
+	}
+	for _, started := range initialActive {
+		if !hostStops[started.SessionID] {
+			t.Fatalf("host cold start did not close prior session=%s: %+v", started.SessionID, sessions)
+		}
 	}
 	snapshot, err := control.Snapshot(context.Background(), HerdrSnapshotScope{WorkspaceLabel: cfg.WorkspaceLabel})
 	if err != nil {

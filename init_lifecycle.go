@@ -459,8 +459,8 @@ func (a *App) startCompanyControlPlane(ctx context.Context, actor string) (strin
 	if err != nil {
 		return "", err
 	}
-	if actor == "hq-init" {
-		if err := a.reconcileInitAbsentAgents(ctx, workspaceID); err != nil {
+	if actor == "hq-init" || actor == "hq-up-host" {
+		if err := a.reconcileStartupAbsentAgents(ctx, workspaceID, actor, actor == "hq-init"); err != nil {
 			return "", err
 		}
 	}
@@ -522,7 +522,7 @@ func (a *App) startCompanyControlPlane(ctx context.Context, actor string) (strin
 	return workspaceID, nil
 }
 
-func (a *App) reconcileInitAbsentAgents(ctx context.Context, workspaceID string) error {
+func (a *App) reconcileStartupAbsentAgents(ctx context.Context, workspaceID, actor string, initOnly bool) error {
 	events, err := a.Sessions.List(SessionFilter{})
 	if err != nil {
 		return err
@@ -535,19 +535,12 @@ func (a *App) reconcileInitAbsentAgents(ctx context.Context, workspaceID string)
 	for _, started := range activeSessionStarts(events) {
 		activeByID[started.SessionID] = started
 	}
-	stopped, err := a.reconcileAbsentRuntimeSessions(events, snapshot, "hq-init")
+	stopped, err := a.reconcileAbsentRuntimeSessions(events, snapshot, actor)
 	if err != nil {
 		return err
 	}
 	for _, sessionID := range stopped {
 		started := activeByID[sessionID]
-		if started.WorkspaceID != workspaceID {
-			return fmt.Errorf("init stale session workspace=%s 与目标 %s 不一致", started.WorkspaceID, workspaceID)
-		}
-		rule, ok := configRuleIncludingDisabled(a.Config, started.Agent)
-		if !ok || rule.Disabled || rule.ActivationPolicy != activationAlways {
-			return fmt.Errorf("init stale session 指向非 always 编制：%s", started.Agent)
-		}
 		var tab *HerdrTab
 		for index := range snapshot.Tabs {
 			if snapshot.Tabs[index].ID == started.TabID {
@@ -556,21 +549,29 @@ func (a *App) reconcileInitAbsentAgents(ctx context.Context, workspaceID string)
 			}
 		}
 		if tab == nil {
+			fmt.Fprintf(a.Out, "已收敛消失的 startup session：agent=%s session=%s\n", started.Agent, started.SessionID)
 			continue
+		}
+		if started.WorkspaceID != workspaceID || tab.WorkspaceID != workspaceID {
+			return fmt.Errorf("startup stale tab workspace=%s/session workspace=%s 与目标 %s 不一致", tab.WorkspaceID, started.WorkspaceID, workspaceID)
+		}
+		rule, ok := configRuleIncludingDisabled(a.Config, started.Agent)
+		if !ok || (initOnly && (rule.Disabled || rule.ActivationPolicy != activationAlways)) {
+			return fmt.Errorf("startup stale session 指向不可由当前启动路径回收的编制：%s", started.Agent)
 		}
 		cwd, err := resolveAgentWorkstation(a.HQRoot, rule)
 		if err != nil || tab.WorkspaceID != workspaceID || tab.Label != rosterTabLabel(rule) || filepath.Clean(tab.CWD) != filepath.Clean(cwd) {
-			return fmt.Errorf("init stale session tab 不再满足冻结 seat 合同：agent=%s tab=%s", started.Agent, started.TabID)
+			return fmt.Errorf("startup stale session tab 不再满足冻结 seat 合同：agent=%s tab=%s", started.Agent, started.TabID)
 		}
 		for _, agent := range snapshot.Agents {
 			if agent.TabID == tab.ID {
-				return fmt.Errorf("init stale session tab=%s 已被 live agent %s 占用，拒绝回收", tab.ID, agent.Name)
+				return fmt.Errorf("startup stale session tab=%s 已被 live agent %s 占用，拒绝回收", tab.ID, agent.Name)
 			}
 		}
 		if err := a.closeOwnedTab(ctx, tab.ID); err != nil {
-			return fmt.Errorf("回收 init stale tab %s：%w", tab.ID, err)
+			return fmt.Errorf("回收 startup stale tab %s：%w", tab.ID, err)
 		}
-		fmt.Fprintf(a.Out, "已收敛消失的 init session 并回收 stale tab：agent=%s tab=%s\n", started.Agent, tab.ID)
+		fmt.Fprintf(a.Out, "已收敛消失的 startup session 并回收 stale tab：agent=%s tab=%s\n", started.Agent, tab.ID)
 	}
 	return nil
 }

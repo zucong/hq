@@ -74,6 +74,10 @@ agent 显式 `runtime reap --retry-failed`；`hibernate_attempting|hibernate_unk
 incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸 Herdr Prompt/显式
 `hq up <on_assignment-seat>` 绕过恢复栅栏。
 
+整家公司关闭后的恢复使用宿主机无参数 `hq up`，不得重跑 `hq init`。该路径会先依据 Herdr snapshot 为所有
+已消失但仍记作 active 的旧 session 追加 `stopped`，再启动新的 always-role incarnation；发布验证必须确认
+旧 session 全部终止、新 session 使用新的 runtime identity，且业务 ledger 不因冷启动发生变化。
+
 ## 发布完成条件
 
 首次发布只有同时满足以下条件才算完成：
