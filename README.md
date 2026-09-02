@@ -234,6 +234,10 @@ staff mutation 调用，用候选配置核验 ledger。
 
 ```text
 Config v3
+├── runtime_fallback                  # optional process-carrier policy
+│   ├── auto / trigger: content_safeguard
+│   ├── from_kind / to_kind
+│   └── permission_mode / agent_args
 ├── role_cards[]
 │   ├── role_card_id / version / status / department / capabilities
 │   ├── manual_path / manual_digest
@@ -255,6 +259,13 @@ Config v3
 version: 3
 workspace_label: example-hq
 owner_principal: ZC
+runtime_fallback:
+  auto: true
+  trigger: content_safeguard
+  from_kind: codex
+  to_kind: grok
+  permission_mode: yolo
+  agent_args: [--always-approve]
 role_cards:
   - role_card_id: secretary
     version: 1
@@ -319,7 +330,8 @@ delivery_policy:
 - `approval_witness` 和 `account_closer` 各自只有一名在职持有人；
 - 至少一名在职 agent 具有 `can_manage_staff=true`；
 - 每名在职 seat 必须声明合法 Herdr `kind`，才能常驻或按需启动。
-- `permission_mode` 为 `yolo|native`；`native` 不追加自动授权 argv；`agent_args` 非空时完整覆盖 kind 默认参数。
+- `permission_mode` 为 `yolo|native`；`native` 只传递显式 `agent_args`；`yolo` 会在显式参数后补齐该 kind 的必需自动授权 argv，不允许自定义参数意外降权。
+- 可选 `runtime_fallback` 只替换稳定 seat 的模型运行载体，不修改 employee seat、Role Card、workstation 或 Assignment Contract；当 `auto=true` 时，HQ 只对可核验的 `content_safeguard` 终端状态触发一次保守切换。
 
 常用维护命令：
 
@@ -598,11 +610,12 @@ attempt 会冻结 manifest 与最终 prompt digest，overflow 留待后续回合
 `delivery consume` 保留为故障恢复/调试入口。通过 `staff add` 新入职的成员在收到直属经理首个
 durable case 前，平级或跨部门消息只会静默排队，不会唤醒或要求其处理。
 
-`agents[].agent_args` 可显式配置传给 Herdr `agent start ... --` 后的原生 argv，并完全覆盖内置默认值。
+`agents[].agent_args` 可显式配置传给 Herdr `agent start ... --` 后的原生 argv。`permission_mode=native`
+只传递这些参数；`permission_mode=yolo` 会在其后补齐 kind 的必需授权参数。
 HQ 为九种常用 kind 提供自动授权启动参数：
 
 - `claude`: `--dangerously-skip-permissions`
-- `codex`: `--approve-for-me`（自动审查，仍使用 workspace-write sandbox，并非无沙箱 YOLO）
+- `codex`: `--dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust`
 - `copilot`: `--yolo`
 - `cursor`: `--force`
 - `gemini`: `--approval-mode=yolo`
@@ -611,8 +624,7 @@ HQ 为九种常用 kind 提供自动授权启动参数：
 - `opencode`: `--auto`（仍服从显式 deny 规则）
 - `qwen`: `--approval-mode=yolo`
 
-未知 kind 不猜测权限参数。若 Codex 岗位必须直接访问 Herdr/HQ 的 Unix socket，公司可显式配置
-`agent_args: ["--sandbox", "danger-full-access", "--ask-for-approval", "never"]`。这些自动授权模式会
+未知 kind 不猜测权限参数。这些自动授权模式会
 扩大 Agent 对本机文件、命令、网络或外部工具的操作能力，应只用于权限边界明确的岗位和环境。
 
 ## 投递与恢复
@@ -686,11 +698,12 @@ strict replay 会从持久化的真实 base payload 与 envelopes 重算每项 b
 ./bin/hq project show --project <case.project 的精确值>
 ./bin/hq patrol --json
 ./bin/hq session list --agent <slug> \
-  --type started|hibernate_attempting|hibernate_deferred|hibernate_failed|hibernate_unknown|stopped --json
+  --type started|stopped|hibernate_attempting|hibernate_deferred|hibernate_failed|hibernate_unknown|fallback_attempting|fallback_failed|fallback_unknown|fallback_recovery_sent --json
 ./bin/hq --direct runtime status [--agent <slug>] [--json]
 ./bin/hq --direct runtime reap [--agent <slug>] [--json]
 ./bin/hq --direct runtime reap --agent <slug> --retry-failed
 ./bin/hq --direct runtime reap --agent <slug> --retry-unknown
+./bin/hq --direct runtime fallback --agent <slug> [--retry-unknown]
 ./bin/hq flow show --case <case-id> --json
 ./bin/hq index rebuild
 ./bin/hq index query --entity flow_events --case <case-id>
@@ -734,6 +747,26 @@ session 诊断流为 `started → hibernate_attempting → stopped`，可以保�
 若 agent 已消失但空 tab 仍在，HQ 会补记 runtime stopped，但不把空 tab 当作 HQ 拥有的当前
 incarnation 自动关闭。`runtime status/reap` 会持续显示 `orphan_tab_without_agent`，运维者应先运行
 `hq patrol`，核对后在 Herdr 人工清理该 tab。
+
+### 模型 safeguard 的运行载体 fallback
+
+当配置 `runtime_fallback.auto=true` 时，gateway 的周期守护会读取已登记 seat 的有界终端快照。它只在同时满足
+以下条件时把 `from_kind` 替换为 `to_kind`：
+
+- 终端尾部同时出现完整的 provider `This content can't be shown`、cybersecurity/Trusted Access 文本与 Codex 输入提示，而非仅在任务正文中引用这句话；
+- runtime 仍精确绑定当前 workspace/tab/pane/terminal/native session，且处于 idle/blocked；
+- seat 持有未完成的 durable assignment 或 case，可生成恢复清单。
+
+状态机先记录 `fallback_attempting`，只有 Herdr snapshot 明确证明旧 tab 消失后，才追加 `stopped`
+并启动新载体。关闭结果不确定时进入 `fallback_unknown`，禁止自动启动第二个运行实例。新 session
+使用同一 seat、工位和 HQ 账本；恢复信封列出 active assignment/case 及精确查询命令。隐藏模型聊天记录不会被宣称为跨供应商复制；
+连续性来自 durable ledger、版本化 `AGENTS.md` 和同一 workstation。`fallback_recovery_sent` 是恢复信封已确认投递的审计事实；
+记账失败时允许幂等重发该恢复信封，但不重建 case 或 assignment。
+
+`fallback_attempting|fallback_unknown` 不会被自动重试。新业务在写入 origin/WIP 前会被 fail closed，并告诉
+`can_manage_staff` 运维角色先用 `runtime status --agent <slug>` 核验同一 Codex incarnation/tab，再显式运行
+`hq --direct runtime fallback --agent <slug> --retry-unknown`。若旧 tab 已由人工或延迟 CloseTab 消失，下一轮 watcher 会依据
+snapshot 补记 stopped 并继续 fallback，不需要重发业务任务。
 
 `close` 必须按 child-before-parent 的 post-order 销账；`accepted` 仍不是 `closed`。若 descendant 有 active
 assignment 或处于 escalation，报错会分别标出必须行动的 assignee/reviewer/owner，不能由 account closer

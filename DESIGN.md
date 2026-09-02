@@ -199,6 +199,10 @@ Config
 │   ├── max_consecutive_wakes
 │   ├── max_bundle_items
 │   └── max_bundle_bytes
+├── runtime_fallback
+│   ├── auto / trigger
+│   ├── from_kind / to_kind
+│   └── permission_mode / agent_args
 ├── role_cards[]
 │   ├── role_card_id / version / label / status
 │   ├── department / capabilities / approval_ref
@@ -257,8 +261,8 @@ exclusive registry lease，不能再次嵌套 shared lease。
 两次 Store 操作之间改变，后续 stale conflict 只能让协议进入保守恢复。
 
 `staff remove` 只停用身份。改 slug 使用新增、更新引用、停用原身份的显式序列，绝不重写已落账事件。
-`permission_mode=native` 不追加自动授权参数；`yolo` 使用已知 kind 的内置参数；非空 `agent_args`
-完整覆盖内置值。未知 kind 不猜测权限参数。
+`permission_mode=native` 只传递显式 `agent_args`；`yolo` 使用已知 kind 的内置必需授权参数，并在显式
+`agent_args` 后补齐缺失项。因此显式的模型 effort 或其他参数不会意外取消 `yolo` 运行语义。未知 kind 不猜测权限参数。
 
 ## 8. 身份与 Herdr 合同
 
@@ -331,6 +335,26 @@ Herdr 当前 CloseTab 只接受 `tab_id`，不接受 expected terminal/native se
 flock 时重读 config、ledger/session 与最终 snapshot，从而拒绝已可观察的替换；但同用户在最终
 snapshot 与 CloseTab 之间的外部替换不能由 HQ 单方原子排除。这是明示 capability boundary；
 完全消除需要 Herdr conditional close/CAS，HQ 不把最终 snapshot 宣称为原子 close binding。
+
+### Runtime carrier fallback
+
+`runtime_fallback` 是公司级运行策略，不是第二份员工编制。它只允许已登记 seat 的 primary `kind`
+在明确 trigger 下改由一个 fallback kind 占用；seat digest、Role Card、workstation、reports_to 与 active
+Assignment Contract 保持不变。这个分层允许既有在途 assignment 在不修改冻结人员合同的前提下恢复。
+
+`content_safeguard` detector 只读 Herdr 的有界 detection scrollback，并要求完整 provider 标记与终端输入提示同时存在。
+它不因任务文本单独引用 `This content can't be shown` 而触发，也不对无 durable active work 的空闲 seat 切换。
+切换共用 runtime-seat lease、ESTOP admission、up lock 和 current-registry lease。旧 session 先进入 `fallback_attempting`；
+CloseTab 后只有 snapshot 证明 tab absence 才写 `stopped` 并启动新 kind。`fallback_unknown` 禁止自动重试，
+避免一个 seat 同时出现两个载体。
+显式恢复由 `can_manage_staff` 角色在核对同一 Codex incarnation/tab 后执行
+`hq --direct runtime fallback --agent <seat> --retry-unknown`；该命令重走终端证据、binding 和 tab-absence 栅栏，
+不接受批量 target。若旧 tab 已消失，watcher 可用 snapshot 补记 stopped 后前滚，不会再调用 CloseTab。
+
+新载体的 recovery envelope 从严格重放的 ledger 列出 active assignment 和 owned case，要求新会话重读当前
+`AGENTS.md`、`assignment show`、`history` 与同一 workstation。HQ 不声称能复制前一模型的隐藏 transcript；
+它保证的是组织身份与持久任务事实连续。投递确认后追加 `fallback_recovery_sent`；如果仅该记账失败，
+下一轮可幂等重发 recovery envelope，不重建 case/assignment。
 
 ## 9. 业务模型
 
@@ -516,9 +540,10 @@ bundle/consume 抢占；但 stdout/调用方输出不是 durable transport。若
 lease、ack/reconcile；HQ 不把人工 consume 或本地 render 宣称为 exactly-once。
 `delivery consume` 仅保留为人工恢复/调试入口。协调事件进入审计账本，但不混入模型业务正文。
 新入职成员在收到直属经理首个 durable case 前，peer/cross-department message 强制静默排队。
-Agent 原生启动参数优先使用 registry 的 `agent_args`；未配置时，HQ 为 claude/codex/copilot/cursor/
-gemini/grok/kimi/opencode/qwen 提供经各 CLI 官方合同确认的自动授权 argv。未知 kind 不猜测参数。
-不同 CLI 的“自动”语义并不完全等价，岗位仍应通过 `agent_args` 显式收紧或覆盖 sandbox/权限策略。
+Agent 原生启动参数先传递 registry 的 `agent_args`；`permission_mode=yolo` 再为 claude/codex/copilot/cursor/
+gemini/grok/kimi/opencode/qwen 补齐该 kind 的必需自动授权 argv。未知 kind 不猜测参数。
+不同 CLI 的“自动”语义并不完全等价；如需收紧权限，必须把 seat 显式改为 `permission_mode=native`，
+不得在声明为 `yolo` 的同时依靠自定义 argv 偶然降权。
 
 ### Nudge 与 Reminder
 

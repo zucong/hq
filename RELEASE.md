@@ -55,6 +55,8 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
 9. 用 root 下的一个非关键 child 完成 issue → accept → report → accept/close 的首条真实 v3 链路；
 10. 对 `on_assignment` canary 核验 `runtime status`、有界 keep-warm 后的自动休眠、同 seat
    cold-resume 以及第二个完整周期；`always` 管理层必须全程在线。
+11. 如配置 `runtime_fallback`，用合成 terminal evidence 验证 primary 关闭、fallback 启动、
+    `fallback_recovery_sent` 以及原 assignment/case 不变；CloseTab ambiguous 必须 fail closed 且不得出现双 runtime。
 
 公司实例不依赖源码目录或全局 `hq`，但运行环境必须单独提供 `herdr` 与 registry 所选
 Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册、成立决策和发布 checksum 的审计记录。
@@ -92,6 +94,10 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
 - 至少完成一个不改变业务状态的健康验证，并在需要时完成受控 canary case；
 - canary 证明 `on_assignment` 可 reap → 同 seat cold-resume → 再次 reap，同时 `always` 席位不被自动关闭；
 - `runtime status/reap` 的 failed/unknown 诊断、单 seat 恢复和 gateway 重启补偿已通过测试。
+- `permission_mode=yolo` 在显式 effort/自定义 argv 存在时仍补齐必需授权参数；Codex 包含
+  approvals/sandbox 与 hook-trust 两个 bypass。
+- 启用 runtime fallback 时，精确 provider safeguard 证据可从 primary 收敛到 fallback，同一 seat/
+  workstation/assignment/case 保持连续，且旧 stop、新 start 与 recovery delivery 都有 session 审计事实。
 - `on_assignment` seat 在原 assignment 仍未完成时，可由精确绑定的 report return 或合同 issuer 的 actionable
   message 从休眠中恢复；无关 case、非合同 actor、info message 不得取得启动权；prepared delivery reconcile
   必须复用原 ID 且至多 Prompt 一次。

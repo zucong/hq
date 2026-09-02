@@ -190,6 +190,7 @@ func newAppWithDependencies(paths runtimePaths, cfg Config, options globalOption
 	if deps.Estop == nil {
 		deps.Estop = &FileEstopStore{Root: filepath.Join(paths.DataDir, "estop")}
 	}
+	hydrateRuntimeFallback(&cfg)
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -1750,6 +1751,7 @@ func printUsage(w io.Writer) {
   hq --direct estop release --id ID --reason TEXT
   hq --direct runtime status [--agent AGENT]
   hq --direct runtime reap [--agent AGENT] [--retry-failed|--retry-unknown]
+  hq --direct runtime fallback --agent AGENT [--retry-unknown]
   hq board [--all]
   hq doctor [--json]
   hq history --case ID

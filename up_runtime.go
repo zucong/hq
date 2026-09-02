@@ -352,7 +352,26 @@ func (a *App) startHQAgent(ctx context.Context, workspaceID string, rule AgentRu
 }
 
 func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule AgentRule) error {
-	if rule.Kind == "" {
+	return a.startHQAgentAdmittedWithOptions(ctx, workspaceID, rule, runtimeStartOptions{})
+}
+
+type runtimeStartOptions struct {
+	Kind           string
+	PermissionMode string
+	AgentArgs      []string
+	Actor          string
+	Reason         string
+	PromptSuffix   string
+}
+
+func (a *App) startHQAgentAdmittedWithOptions(ctx context.Context, workspaceID string, rule AgentRule, options runtimeStartOptions) error {
+	runtimeRule := rule
+	if options.Kind != "" {
+		runtimeRule.Kind = options.Kind
+		runtimeRule.PermissionMode = options.PermissionMode
+		runtimeRule.AgentArgs = append([]string(nil), options.AgentArgs...)
+	}
+	if runtimeRule.Kind == "" {
 		return fmt.Errorf("员工 %s 未配置 kind", rule.Name)
 	}
 	cwd, err := validateWorkstation(a.HQRoot, rule)
@@ -391,8 +410,8 @@ func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule
 	if created.Tab.ID == "" || created.Pane.ID == "" {
 		return fmt.Errorf("tab create 未返回稳定 tab/pane id")
 	}
-	native := nativeAgentArgs(rule)
-	start := a.Herdr.StartAgent(ctx, rule.Name, rule.Kind, created.Pane.ID, native)
+	native := nativeAgentArgs(runtimeRule)
+	start := a.Herdr.StartAgent(ctx, rule.Name, runtimeRule.Kind, created.Pane.ID, native)
 	for attempt := 0; start.Err != nil && start.Outcome == herdrDefinitelyNotRun && start.ErrorCode == "agent_pane_busy" && attempt < 19; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -402,13 +421,13 @@ func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule
 		if ctx.Err() != nil {
 			break
 		}
-		start = a.Herdr.StartAgent(ctx, rule.Name, rule.Kind, created.Pane.ID, native)
+		start = a.Herdr.StartAgent(ctx, rule.Name, runtimeRule.Kind, created.Pane.ID, native)
 	}
 	if start.Err != nil {
 		if start.Outcome == herdrAmbiguous {
 			snapshot, snapshotErr := a.herdrSnapshot(ctx)
 			if snapshotErr == nil {
-				if matched, mismatch := exactStartedAgentMatch(snapshot, workspaceID, rule, a.HQRoot, created); matched {
+				if matched, mismatch := exactStartedAgentMatch(snapshot, workspaceID, runtimeRule, a.HQRoot, created); matched {
 					start.Err = nil
 				} else if mismatch != "" {
 					start.Err = fmt.Errorf("ambiguous start reconcile mismatch: %s", mismatch)
@@ -425,7 +444,7 @@ func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule
 		cleanupErr := a.closeOwnedTab(ctx, created.Tab.ID)
 		return combineLifecycleError(fmt.Errorf("start 后 snapshot 核验失败：%w", err), cleanupErr, created.Tab.ID)
 	}
-	initialBinding, bindingErr := resolveStartedAgentBinding(snapshot, workspaceID, rule, a.HQRoot, created)
+	initialBinding, bindingErr := resolveStartedAgentBinding(snapshot, workspaceID, runtimeRule, a.HQRoot, created)
 	if bindingErr != nil {
 		cleanupErr := a.closeOwnedTab(ctx, created.Tab.ID)
 		return combineLifecycleError(fmt.Errorf("start 未形成精确 live 匹配：%w", bindingErr), cleanupErr, created.Tab.ID)
@@ -434,11 +453,18 @@ func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule
 	if a.Clock != nil {
 		now = a.Clock()
 	}
-	actor := a.MaintenanceActor
+	actor := options.Actor
+	if actor == "" {
+		actor = a.MaintenanceActor
+	}
 	if actor == "" {
 		actor = "hq-up"
 	}
-	event, err := newSessionEvent(now, "started", created, workspaceID, rule, actor, "hq up confirmed agent start", cwd)
+	reason := options.Reason
+	if reason == "" {
+		reason = "hq up confirmed agent start"
+	}
+	event, err := newSessionEvent(now, "started", created, workspaceID, rule, actor, reason, cwd)
 	if err != nil {
 		cleanupErr := a.closeOwnedTab(ctx, created.Tab.ID)
 		return combineLifecycleError(err, cleanupErr, created.Tab.ID)
@@ -457,7 +483,7 @@ func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule
 		return &PartialStartError{Agent: rule.Name, WorkspaceID: workspaceID, TabID: created.Tab.ID, PaneID: created.Pane.ID,
 			SessionID: event.SessionID, Cause: fmt.Errorf("startup Prompt 前 live binding snapshot 失败：%w", finalSnapshotErr)}
 	}
-	finalBinding, finalBindingErr := resolveStartedAgentBinding(finalSnapshot, workspaceID, rule, a.HQRoot, created)
+	finalBinding, finalBindingErr := resolveStartedAgentBinding(finalSnapshot, workspaceID, runtimeRule, a.HQRoot, created)
 	if finalBindingErr != nil {
 		return &PartialStartError{Agent: rule.Name, WorkspaceID: workspaceID, TabID: created.Tab.ID, PaneID: created.Pane.ID,
 			SessionID: event.SessionID, Cause: fmt.Errorf("startup Prompt 前 live binding 核验失败：%w", finalBindingErr)}
@@ -467,17 +493,20 @@ func (a *App) startHQAgentAdmitted(ctx context.Context, workspaceID string, rule
 			SessionID: event.SessionID, Cause: fmt.Errorf("startup Prompt 前 runtime incarnation 漂移：%s", mismatch)}
 	}
 	prompt := startupEnvelopeWithRuntime(rule, a.Config.ownerPrincipal(), filepath.Join(a.Office, "tools", "hq", "bin", "hq"), cwd)
+	if strings.TrimSpace(options.PromptSuffix) != "" {
+		prompt += "\n\n" + strings.TrimSpace(options.PromptSuffix)
+	}
 	promptResult := a.Herdr.Prompt(ctx, rule.Name, prompt)
 	if promptResult.Err != nil {
 		return &PartialStartError{Agent: rule.Name, WorkspaceID: workspaceID, TabID: created.Tab.ID, PaneID: created.Pane.ID, SessionID: event.SessionID, Cause: promptResult.Err}
 	}
-	_, err = fmt.Fprintf(a.Out, "已启动 %s（department=%s kind=%s pane=%s session=%s）\n", rule.Name, rule.Department, rule.Kind, created.Pane.ID, event.SessionID)
+	_, err = fmt.Fprintf(a.Out, "已启动 %s（department=%s kind=%s pane=%s session=%s）\n", rule.Name, rule.Department, runtimeRule.Kind, created.Pane.ID, event.SessionID)
 	return err
 }
 
 var defaultAgentArgsByKind = map[string][]string{
 	"claude":   {"--dangerously-skip-permissions"},
-	"codex":    {"--approve-for-me"},
+	"codex":    {"--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"},
 	"copilot":  {"--yolo"},
 	"cursor":   {"--force"},
 	"gemini":   {"--approval-mode=yolo"},
@@ -488,18 +517,25 @@ var defaultAgentArgsByKind = map[string][]string{
 }
 
 func nativeAgentArgs(rule AgentRule) []string {
-	if len(rule.AgentArgs) != 0 {
-		return append([]string(nil), rule.AgentArgs...)
-	}
+	result := append([]string(nil), rule.AgentArgs...)
 	if rule.PermissionMode == "native" {
-		return nil
+		return result
 	}
 	if rule.PermissionMode == "yolo" {
-		if defaults := defaultAgentArgsByKind[rule.Kind]; len(defaults) != 0 {
-			return append([]string(nil), defaults...)
+		for _, required := range defaultAgentArgsByKind[rule.Kind] {
+			found := false
+			for _, existing := range result {
+				if existing == required {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append(result, required)
+			}
 		}
 	}
-	return nil
+	return result
 }
 
 func startupEnvelope(rule AgentRule, ownerPrincipal string) string {
@@ -699,7 +735,11 @@ func (a *App) ensureHQGateway(ctx context.Context, workspaceID string) error {
 		cleanupErr := a.closeOwnedTab(ctx, created.Tab.ID)
 		return combineLifecycleError(fmt.Errorf("启动 HQ 网关：%w", run.Err), cleanupErr, created.Tab.ID)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	// A newly-created Herdr pane can need several seconds to reach an
+	// interactive shell before pane run actually launches the gateway. Keep the
+	// wait bounded, but do not misclassify a confirmed queued command as failed
+	// after only three seconds and close its tab while it is starting.
+	deadline := time.Now().Add(15 * time.Second)
 	lastHealth := GatewayHealth{}
 	for time.Now().Before(deadline) {
 		health := a.GatewayHealth.Ping(ctx, socket, workspaceID)

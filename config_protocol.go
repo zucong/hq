@@ -101,6 +101,7 @@ func decodeCurrentConfig(raw []byte) (Config, error) {
 	if err := validateConfig(cfg); err != nil {
 		return Config{}, err
 	}
+	hydrateRuntimeFallback(&cfg)
 	return cfg, nil
 }
 
@@ -158,6 +159,7 @@ func mutateConfigWithOptions(path string, options configWriteOptions, mutate fun
 			return Config{}, err
 		}
 	}
+	hydrateRuntimeFallback(&cfg)
 	if err := validateConfig(cfg); err != nil {
 		return Config{}, err
 	}

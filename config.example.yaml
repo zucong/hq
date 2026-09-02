@@ -1,6 +1,14 @@
 version: 3
 workspace_label: example-hq
 owner_principal: Ada
+runtime_fallback:
+    auto: true
+    trigger: content_safeguard
+    from_kind: codex
+    to_kind: grok
+    permission_mode: yolo
+    agent_args:
+        - --always-approve
 role_cards:
     - role_card_id: secretary
       version: 1

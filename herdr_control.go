@@ -164,6 +164,13 @@ type HerdrControl interface {
 	Prompt(context.Context, string, string) HerdrMutationResult
 }
 
+// HerdrAgentReader is optional so synthetic controls that only exercise the
+// mutation contract do not need to emulate terminal scrollback. Production
+// execHerdrControl implements it for runtime safeguard detection.
+type HerdrAgentReader interface {
+	ReadAgent(context.Context, string) ([]byte, error)
+}
+
 type unavailableHerdrControl struct{ Err error }
 
 func (u unavailableHerdrControl) failure() HerdrMutationResult {
@@ -565,4 +572,14 @@ func (c *execHerdrControl) Prompt(parent context.Context, target, message string
 	ctx, cancel := context.WithTimeout(parent, c.PromptTimeout)
 	defer cancel()
 	return c.run(ctx, true, "agent", "prompt", target, message)
+}
+
+func (c *execHerdrControl) ReadAgent(parent context.Context, target string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, c.SnapshotTimeout)
+	defer cancel()
+	result := c.run(ctx, false, "agent", "read", target, "--source", "detection", "--lines", "160", "--format", "text")
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return append([]byte(nil), result.Raw...), nil
 }

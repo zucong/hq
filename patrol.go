@@ -262,8 +262,8 @@ func analyzePatrolSnapshotWithFrozen(snapshot HerdrSnapshot, cfg Config, hqRoot 
 			addPatrolFinding(&analysis, PatrolFinding{Category: "drift", ObjectID: objectID, Agent: agent.Name, SignalType: "cwd_mismatch", Message: fmt.Sprintf("cwd=%s want=%s", agent.CWD, expectedCWD)})
 			addPatrolSignal(&analysis, objectID, "cwd_mismatch", "cwd="+agent.CWD)
 		}
-		if rule.Kind != "" && agent.Kind != rule.Kind {
-			addPatrolFinding(&analysis, PatrolFinding{Category: "drift", ObjectID: objectID, Agent: agent.Name, SignalType: "kind_mismatch", Message: fmt.Sprintf("kind=%s want=%s", agent.Kind, rule.Kind)})
+		if rule.Kind != "" && !cfg.runtimeKindAllowed(rule, agent.Kind) {
+			addPatrolFinding(&analysis, PatrolFinding{Category: "drift", ObjectID: objectID, Agent: agent.Name, SignalType: "kind_mismatch", Message: fmt.Sprintf("kind=%s want primary=%s or configured fallback", agent.Kind, rule.Kind)})
 			addPatrolSignal(&analysis, objectID, "kind_mismatch", "kind="+agent.Kind)
 		}
 		tab, tabOK := tabs[agent.TabID]

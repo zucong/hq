@@ -99,6 +99,9 @@ func sessionMatchesBinding(started SessionEvent, binding LiveBinding) bool {
 	if started.TerminalID == "" && started.AgentSessionValue == "" {
 		return false
 	}
+	if started.RuntimeKind != "" && started.RuntimeKind != binding.Kind {
+		return false
+	}
 	if started.TerminalID != "" && binding.TerminalID != started.TerminalID {
 		return false
 	}
@@ -320,6 +323,12 @@ func (a *App) assessRuntimeSeatLocked(rule AgentRule, reconcile bool, retryFaile
 				appendRuntimeBlocker(&assessment.view, "hibernate_unknown_requires_operator_verification")
 				assessment.view.NextAction = "先用 runtime status 核验同一 session/tab；确认仍在后显式加 --retry-unknown，禁止自动重试"
 			}
+		case sessionFallbackAttempting, sessionFallbackUnknown:
+			appendRuntimeBlocker(&assessment.view, "fallback_unknown_requires_operator_verification")
+			assessment.view.NextAction = "先核验当前仍是同一 Codex session/tab；确认后由 can_manage_staff 角色运行 hq --direct runtime fallback --agent " + rule.Name + " --retry-unknown"
+		case sessionFallbackFailed:
+			appendRuntimeBlocker(&assessment.view, "fallback_failed_safe_to_retry")
+			assessment.view.NextAction = "HQ 将在下一轮重新核验 terminal evidence；也可由 can_manage_staff 角色运行 hq --direct runtime fallback --agent " + rule.Name
 		}
 	}
 
@@ -610,6 +619,8 @@ func (a *App) ensureRuntimeSeatOriginSafeLocked(agent string) error {
 		switch diagnostic.Type {
 		case sessionHibernateAttempting, sessionHibernateUnknown:
 			return conflictf("seat %s 的旧 runtime close 尚未收敛（session=%s latest=%s）；为避免延迟 CloseTab 杀掉新 Prompt，HQ 尚未写入新业务 origin/WIP。请由 can_manage_staff 运维角色先运行 hq --direct runtime status --agent %s；核验同一 incarnation/tab 仍在后运行 hq --direct runtime reap --agent %s --retry-unknown，再重试原命令", agent, started.SessionID, diagnostic.Type, agent, agent)
+		case sessionFallbackAttempting, sessionFallbackUnknown:
+			return conflictf("seat %s 的模型 fallback close 尚未收敛（session=%s latest=%s）；HQ 尚未写入新业务 origin/WIP。请由 can_manage_staff 运维角色先运行 hq --direct runtime status --agent %s 核验同一 Codex incarnation/tab；确认仍在后运行 hq --direct runtime fallback --agent %s --retry-unknown，再重试原命令", agent, started.SessionID, diagnostic.Type, agent, agent)
 		case sessionHibernateFailed:
 			// definitely-not-run is safe to supersede once real work arrives. A
 			// deferred diagnostic clears the stale retry-failed requirement so the
@@ -679,8 +690,8 @@ func (a *App) reapRuntimeSeats(agent string, retryFailed, retryUnknown bool) (Ru
 }
 
 func (a *App) cmdRuntime(args []string) error {
-	if len(args) == 0 || (args[0] != "status" && args[0] != "reap") {
-		return fmt.Errorf("用法：hq --direct runtime status|reap [--agent NAME]")
+	if len(args) == 0 || (args[0] != "status" && args[0] != "reap" && args[0] != "fallback") {
+		return fmt.Errorf("用法：hq --direct runtime status|reap|fallback [--agent NAME]")
 	}
 	if a.MaintenanceActor == "" {
 		return permissionf("runtime lifecycle 仅允许已通过 can_manage_staff 运维白名单的 --direct 调用")
@@ -702,6 +713,19 @@ func (a *App) cmdRuntime(args []string) error {
 	}
 	if args[0] == "reap" && (*retryFailed || *retryUnknown) && strings.TrimSpace(*agent) == "" {
 		return fmt.Errorf("--retry-failed/--retry-unknown 必须与单一 --agent NAME 一起使用，禁止批量重试 runtime close")
+	}
+	if args[0] == "fallback" {
+		if strings.TrimSpace(*agent) == "" {
+			return fmt.Errorf("runtime fallback 必须显式指定单一 --agent NAME，禁止批量替换模型载体")
+		}
+		if *retryFailed {
+			return fmt.Errorf("runtime fallback 不接受 --retry-failed；首次或 definitely-not-run 重试直接移除该 flag，只有 fallback_attempting|fallback_unknown 需要 --retry-unknown")
+		}
+		if err := a.retryContentSafeguardFallback(a.requestContext(), *agent, *retryUnknown); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(a.Out, "runtime fallback 已收敛：agent=%s；运行 hq session list --agent %s 核验 old stopped、new started 与 fallback_recovery_sent\n", *agent, *agent)
+		return err
 	}
 	if args[0] == "status" {
 		names, err := a.runtimeSeatNames(*agent)
@@ -761,6 +785,9 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 			return
 		}
 		child.Config = cfg
+	}
+	if fallbackErr := child.recoverContentSafeguardsOnce(ctx); fallbackErr != nil {
+		fmt.Fprintf(a.Err, "[HQ runtime fallback] %v\n", fallbackErr)
 	}
 	report, reapErr := child.reapRuntimeSeats("", false, false)
 	for _, view := range report.Seats {

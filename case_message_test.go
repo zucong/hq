@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -252,9 +253,15 @@ func TestAgentArgsExplicitlyOverrideKindDefaults(t *testing.T) {
 	if rule.AgentArgs[0] == "changed" {
 		t.Fatal("native argv aliases config storage")
 	}
+	merged := nativeAgentArgs(AgentRule{Kind: "codex", PermissionMode: "yolo", AgentArgs: []string{"-c", `model_reasoning_effort="medium"`}})
+	for _, required := range []string{"-c", `model_reasoning_effort="medium"`, "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"} {
+		if !slices.Contains(merged, required) {
+			t.Fatalf("yolo args missing %q: %v", required, merged)
+		}
+	}
 	wants := map[string][]string{
 		"claude":   {"--dangerously-skip-permissions"},
-		"codex":    {"--approve-for-me"},
+		"codex":    {"--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"},
 		"copilot":  {"--yolo"},
 		"cursor":   {"--force"},
 		"gemini":   {"--approval-mode=yolo"},

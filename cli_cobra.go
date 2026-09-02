@@ -163,8 +163,12 @@ can_manage_staff=true 的精确在岗角色。runtime sender_label 与运行连�
 	session := group("session", "查询严格会话生命周期 JSONL")
 	session.AddCommand(leaf("list", "按 session/agent/type 查询启停事件", "session", "list"))
 	root.AddCommand(session)
-	runtime := group("runtime", "查询并回收 on_assignment 员工运行实例")
-	runtime.AddCommand(leaf("status", "显示 seat 休眠资格与可执行纠正", "runtime", "status"), leaf("reap", "安全休眠已完成且无待办的运行实例", "runtime", "reap"))
+	runtime := group("runtime", "查询、回收或恢复员工运行实例")
+	runtime.AddCommand(
+		leaf("status", "显示 seat 休眠资格与可执行纠正", "runtime", "status"),
+		leaf("reap", "安全休眠已完成且无待办的运行实例", "runtime", "reap"),
+		leaf("fallback", "核验 provider safeguard 并以配置的备用模型继续同一 durable work", "runtime", "fallback"),
+	)
 	root.AddCommand(runtime)
 	flow := group("flow", "查询事项流转信封与投递回执")
 	flow.AddCommand(leaf("show", "机器可核验地显示事项事件链与投递回执", "flow", "show"))
@@ -438,13 +442,16 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 	case "session list":
 		addString("session", "按 session id 过滤")
 		addString("agent", "按 agent 过滤")
-		addString("type", "按 started|stopped|hibernate_attempting|hibernate_deferred|hibernate_failed|hibernate_unknown 过滤")
+		addString("type", "按 started|stopped|hibernate_*|fallback_* 过滤")
 	case "runtime status":
 		addString("agent", "精确 seat slug；默认全部 on_assignment seat")
 	case "runtime reap":
 		addString("agent", "精确 seat slug；默认全部 on_assignment seat")
 		addBool("retry-failed", "显式重试 definitely-not-run 的关闭")
 		addBool("retry-unknown", "人工核验同一 incarnation 仍在后重试 unknown")
+	case "runtime fallback":
+		addString("agent", "必填；要恢复的单一精确 seat slug")
+		addBool("retry-unknown", "人工核验同一 Codex incarnation 仍在后重试 fallback_unknown")
 	case "index query":
 		f.String("entity", "flow_events", "flow_events|cases|deliveries|documents")
 		addString("case", "case_id")
@@ -639,6 +646,8 @@ func requiredFlags(path ...string) []string {
 		return []string{"id", "resolution", "ref", "note"}
 	case "estop activate", "estop release":
 		return []string{"id", "reason"}
+	case "runtime fallback":
+		return []string{"agent"}
 	default:
 		return nil
 	}

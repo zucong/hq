@@ -91,8 +91,8 @@ func ResolveLiveBinding(snapshot HerdrSnapshot, cfg Config, hqRoot string, reque
 	if request.RequireInteractiveReady && !live.InteractiveReady {
 		return LiveBinding{}, fmt.Errorf("agent %s interactive_ready=false", live.Name)
 	}
-	if rule.Kind != "" && live.Kind != rule.Kind {
-		return LiveBinding{}, fmt.Errorf("agent %s kind=%s 与 registry=%s 不匹配", live.Name, live.Kind, rule.Kind)
+	if rule.Kind != "" && !cfg.runtimeKindAllowed(rule, live.Kind) {
+		return LiveBinding{}, fmt.Errorf("agent %s kind=%s 既不是 registry primary=%s，也不是当前 runtime_fallback 允许的载体", live.Name, live.Kind, rule.Kind)
 	}
 	expectedCWD, err := resolveAgentWorkstation(hqRoot, rule)
 	if err != nil {

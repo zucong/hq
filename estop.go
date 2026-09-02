@@ -646,7 +646,7 @@ func planEstopItems(snapshot HerdrSnapshot, cfg Config, hqRoot string) ([]EstopI
 		}
 		if !tabOK || !paneOK || tab.WorkspaceID != workspaceID || pane.WorkspaceID != workspaceID || pane.TabID != tab.ID ||
 			tab.ID != agent.TabID || filepath.Clean(agent.CWD) != expectedCWD || filepath.Clean(tab.CWD) != expectedCWD || filepath.Clean(pane.CWD) != expectedCWD ||
-			(rule.Kind != "" && rule.Kind != agent.Kind) {
+			(rule.Kind != "" && !cfg.runtimeKindAllowed(rule, agent.Kind)) {
 			return nil, fmt.Errorf("ESTOP agent/tab/pane/cwd/kind 关系歧义：%s", agent.Name)
 		}
 		items = append(items, EstopItem{Agent: agent.Name, Department: rule.Department, ReportsTo: rule.ReportsTo,
@@ -1332,7 +1332,7 @@ func (a *App) verifyConfirmedRestoresLive(state EstopState, snapshot HerdrSnapsh
 		rule, ok := a.Config.ruleFor(item.Agent)
 		if !ok || rule.Disabled || a.Config.isManager(rule) || rule.hasResponsibility(roleAccountCloser) ||
 			rule.Department != item.Department || rule.ReportsTo != item.ReportsTo ||
-			(rule.Kind != "" && rule.Kind != item.Kind) {
+			(rule.Kind != "" && !a.Config.runtimeKindAllowed(rule, item.Kind)) {
 			return fmt.Errorf("agent %s confirmed restore 不再符合 current config/plan，ESTOP 保持 active", item.Agent)
 		}
 		if matched, mismatch := exactLiveMatch(snapshot, item.WorkspaceID, rule, a.HQRoot); !matched {
@@ -1437,7 +1437,7 @@ func (a *App) cmdEstopRelease(args []string) error {
 			}
 			actor = liveActor
 			rule, ok := a.Config.ruleFor(item.Agent)
-			if !ok || rule.Disabled || a.Config.isManager(rule) || rule.hasResponsibility(roleAccountCloser) || rule.Department != item.Department || (rule.Kind != "" && rule.Kind != item.Kind) {
+			if !ok || rule.Disabled || a.Config.isManager(rule) || rule.hasResponsibility(roleAccountCloser) || rule.Department != item.Department || (rule.Kind != "" && !a.Config.runtimeKindAllowed(rule, item.Kind)) {
 				return fmt.Errorf("agent %s 不再符合 config/pattern，保留 active", item.Agent)
 			}
 			if _, err := validateWorkstation(a.HQRoot, rule); err != nil {

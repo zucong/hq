@@ -158,36 +158,37 @@ type Snapshot struct {
 }
 
 type AgentRule struct {
-	Name             string   `json:"name,omitempty" yaml:"name"`
-	Label            string   `json:"label" yaml:"sender_label"`
-	Nickname         string   `json:"nickname,omitempty" yaml:"nickname"`
-	DepartmentLabel  string   `json:"department_label,omitempty" yaml:"department_label"`
-	Workspace        string   `json:"workspace,omitempty" yaml:"workspace"`
-	Responsibilities []string `json:"responsibilities,omitempty" yaml:"responsibilities"`
-	ManualPath       string   `json:"manual_path,omitempty" yaml:"manual_path"`
-	RoleCardID       string   `json:"role_card_id,omitempty" yaml:"role_card_id,omitempty"`
-	RoleCardVersion  int      `json:"role_card_version,omitempty" yaml:"role_card_version,omitempty"`
-	RoleCardDigest   string   `json:"role_card_digest,omitempty" yaml:"role_card_digest,omitempty"`
-	WorkstationPath  string   `json:"workstation_path,omitempty" yaml:"workstation_path,omitempty"`
-	ActivationPolicy string   `json:"activation_policy,omitempty" yaml:"activation_policy,omitempty"`
-	KeepWarm         string   `json:"keep_warm,omitempty" yaml:"keep_warm,omitempty"`
-	MaxWIP           int      `json:"max_wip,omitempty" yaml:"max_wip,omitempty"`
-	SeatVersion      int      `json:"seat_version,omitempty" yaml:"seat_version,omitempty"`
-	SeatDigest       string   `json:"seat_digest,omitempty" yaml:"seat_digest,omitempty"`
-	Department       string   `json:"department" yaml:"department"`
-	Kind             string   `json:"kind,omitempty" yaml:"kind,omitempty"`
-	PermissionMode   string   `json:"permission_mode,omitempty" yaml:"permission_mode,omitempty"`
-	AgentArgs        []string `json:"agent_args,omitempty" yaml:"agent_args,omitempty"`
-	ReportsTo        string   `json:"reports_to,omitempty" yaml:"reports_to"`
-	Disabled         bool     `json:"disabled,omitempty" yaml:"disabled"`
-	CanCreate        bool     `json:"can_create,omitempty" yaml:"can_create"`
-	CanIssue         bool     `json:"can_issue,omitempty" yaml:"can_issue"`
-	CanAccept        bool     `json:"can_accept,omitempty" yaml:"can_accept"`
-	CanClose         bool     `json:"can_close,omitempty" yaml:"can_close"`
-	CanManageStaff   bool     `json:"can_manage_staff,omitempty" yaml:"can_manage_staff"`
-	CanReceiveOrder  bool     `json:"can_receive_order,omitempty" yaml:"can_receive_order"`
-	ApprovalRef      string   `json:"approval_ref,omitempty" yaml:"approval_ref,omitempty"`
-	UpdatedAt        string   `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+	Name                string   `json:"name,omitempty" yaml:"name"`
+	Label               string   `json:"label" yaml:"sender_label"`
+	Nickname            string   `json:"nickname,omitempty" yaml:"nickname"`
+	DepartmentLabel     string   `json:"department_label,omitempty" yaml:"department_label"`
+	Workspace           string   `json:"workspace,omitempty" yaml:"workspace"`
+	Responsibilities    []string `json:"responsibilities,omitempty" yaml:"responsibilities"`
+	ManualPath          string   `json:"manual_path,omitempty" yaml:"manual_path"`
+	RoleCardID          string   `json:"role_card_id,omitempty" yaml:"role_card_id,omitempty"`
+	RoleCardVersion     int      `json:"role_card_version,omitempty" yaml:"role_card_version,omitempty"`
+	RoleCardDigest      string   `json:"role_card_digest,omitempty" yaml:"role_card_digest,omitempty"`
+	WorkstationPath     string   `json:"workstation_path,omitempty" yaml:"workstation_path,omitempty"`
+	ActivationPolicy    string   `json:"activation_policy,omitempty" yaml:"activation_policy,omitempty"`
+	KeepWarm            string   `json:"keep_warm,omitempty" yaml:"keep_warm,omitempty"`
+	MaxWIP              int      `json:"max_wip,omitempty" yaml:"max_wip,omitempty"`
+	SeatVersion         int      `json:"seat_version,omitempty" yaml:"seat_version,omitempty"`
+	SeatDigest          string   `json:"seat_digest,omitempty" yaml:"seat_digest,omitempty"`
+	Department          string   `json:"department" yaml:"department"`
+	Kind                string   `json:"kind,omitempty" yaml:"kind,omitempty"`
+	PermissionMode      string   `json:"permission_mode,omitempty" yaml:"permission_mode,omitempty"`
+	AgentArgs           []string `json:"agent_args,omitempty" yaml:"agent_args,omitempty"`
+	RuntimeFallbackKind string   `json:"-" yaml:"-"`
+	ReportsTo           string   `json:"reports_to,omitempty" yaml:"reports_to"`
+	Disabled            bool     `json:"disabled,omitempty" yaml:"disabled"`
+	CanCreate           bool     `json:"can_create,omitempty" yaml:"can_create"`
+	CanIssue            bool     `json:"can_issue,omitempty" yaml:"can_issue"`
+	CanAccept           bool     `json:"can_accept,omitempty" yaml:"can_accept"`
+	CanClose            bool     `json:"can_close,omitempty" yaml:"can_close"`
+	CanManageStaff      bool     `json:"can_manage_staff,omitempty" yaml:"can_manage_staff"`
+	CanReceiveOrder     bool     `json:"can_receive_order,omitempty" yaml:"can_receive_order"`
+	ApprovalRef         string   `json:"approval_ref,omitempty" yaml:"approval_ref,omitempty"`
+	UpdatedAt           string   `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
 }
 
 type RoleCard struct {
@@ -205,12 +206,13 @@ type RoleCard struct {
 }
 
 type Config struct {
-	Version        int             `json:"version" yaml:"version"`
-	WorkspaceLabel string          `json:"workspace_label,omitempty" yaml:"workspace_label"`
-	OwnerPrincipal string          `json:"owner_principal,omitempty" yaml:"owner_principal"`
-	RoleCards      []RoleCard      `json:"role_cards,omitempty" yaml:"role_cards,omitempty"`
-	Agents         []AgentRule     `json:"agents" yaml:"agents"`
-	DeliveryPolicy *DeliveryPolicy `json:"delivery_policy,omitempty" yaml:"delivery_policy,omitempty"`
+	Version         int                    `json:"version" yaml:"version"`
+	WorkspaceLabel  string                 `json:"workspace_label,omitempty" yaml:"workspace_label"`
+	OwnerPrincipal  string                 `json:"owner_principal,omitempty" yaml:"owner_principal"`
+	RoleCards       []RoleCard             `json:"role_cards,omitempty" yaml:"role_cards,omitempty"`
+	Agents          []AgentRule            `json:"agents" yaml:"agents"`
+	DeliveryPolicy  *DeliveryPolicy        `json:"delivery_policy,omitempty" yaml:"delivery_policy,omitempty"`
+	RuntimeFallback *RuntimeFallbackPolicy `json:"runtime_fallback,omitempty" yaml:"runtime_fallback,omitempty"`
 }
 
 type DeliveryPolicy struct {
@@ -218,6 +220,59 @@ type DeliveryPolicy struct {
 	MaxConsecutiveWakes int    `json:"max_consecutive_wakes" yaml:"max_consecutive_wakes"`
 	MaxBundleItems      int    `json:"max_bundle_items,omitempty" yaml:"max_bundle_items,omitempty"`
 	MaxBundleBytes      int    `json:"max_bundle_bytes,omitempty" yaml:"max_bundle_bytes,omitempty"`
+}
+
+// RuntimeFallbackPolicy changes only the process that occupies a stable HQ
+// seat. It deliberately lives outside AgentRule: an assignment remains bound
+// to the same employee, role card, workstation and durable case even when a
+// model provider cannot serve one turn.
+type RuntimeFallbackPolicy struct {
+	Auto           bool     `json:"auto" yaml:"auto"`
+	Trigger        string   `json:"trigger" yaml:"trigger"`
+	FromKind       string   `json:"from_kind" yaml:"from_kind"`
+	ToKind         string   `json:"to_kind" yaml:"to_kind"`
+	PermissionMode string   `json:"permission_mode" yaml:"permission_mode"`
+	AgentArgs      []string `json:"agent_args,omitempty" yaml:"agent_args,omitempty"`
+}
+
+func validateNativeAgentArgs(label string, args []string) error {
+	if len(args) > 16 {
+		return fmt.Errorf("%s 的 agent_args 最多 16 项", label)
+	}
+	for _, arg := range args {
+		if arg == "" || strings.TrimSpace(arg) != arg || strings.ContainsAny(arg, "\r\n\x00") || utf8.RuneCountInString(arg) > 200 {
+			return fmt.Errorf("%s 的 agent_args 必须是非空、无首尾空白、至多 200 rune 的单行 argv", label)
+		}
+	}
+	return nil
+}
+
+func (c Config) runtimeKindAllowed(rule AgentRule, kind string) bool {
+	if kind == rule.Kind {
+		return true
+	}
+	if rule.RuntimeFallbackKind != "" && kind == rule.RuntimeFallbackKind {
+		return true
+	}
+	policy := c.RuntimeFallback
+	return policy != nil && policy.FromKind == rule.Kind && policy.ToKind == kind
+}
+
+func hydrateRuntimeFallback(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	for index := range cfg.Agents {
+		cfg.Agents[index].RuntimeFallbackKind = ""
+	}
+	if cfg.RuntimeFallback == nil {
+		return
+	}
+	for index := range cfg.Agents {
+		if cfg.Agents[index].Kind == cfg.RuntimeFallback.FromKind {
+			cfg.Agents[index].RuntimeFallbackKind = cfg.RuntimeFallback.ToKind
+		}
+	}
 }
 
 type Actor struct {
@@ -286,6 +341,20 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("delivery_policy.max_bundle_bytes 必须省略/为 0，或在 1..%d", maxDeliveryBundleBytes)
 		}
 	}
+	if policy := cfg.RuntimeFallback; policy != nil {
+		if policy.Trigger != "content_safeguard" {
+			return fmt.Errorf("runtime_fallback.trigger 必须是 content_safeguard")
+		}
+		if strings.TrimSpace(policy.FromKind) == "" || strings.TrimSpace(policy.ToKind) == "" || policy.FromKind == policy.ToKind {
+			return fmt.Errorf("runtime_fallback.from_kind/to_kind 必须是两个不同的非空 agent kind")
+		}
+		if policy.PermissionMode != "native" && policy.PermissionMode != "yolo" {
+			return fmt.Errorf("runtime_fallback.permission_mode 必须显式为 native|yolo")
+		}
+		if err := validateNativeAgentArgs("runtime_fallback", policy.AgentArgs); err != nil {
+			return err
+		}
+	}
 	seen := map[string]bool{}
 	roles := map[string]string{}
 	staffMaintainers := 0
@@ -314,13 +383,8 @@ func validateConfig(cfg Config) error {
 		if rule.PermissionMode != "native" && rule.PermissionMode != "yolo" {
 			return fmt.Errorf("agent %s 的 permission_mode 必须显式为 native|yolo", rule.Name)
 		}
-		if len(rule.AgentArgs) > 16 {
-			return fmt.Errorf("agent %s 的 agent_args 最多 16 项", rule.Name)
-		}
-		for _, arg := range rule.AgentArgs {
-			if arg == "" || strings.TrimSpace(arg) != arg || strings.ContainsAny(arg, "\r\n\x00") || utf8.RuneCountInString(arg) > 200 {
-				return fmt.Errorf("agent %s 的 agent_args 必须是非空、无首尾空白、至多 200 rune 的单行 argv", rule.Name)
-			}
+		if err := validateNativeAgentArgs("agent "+rule.Name, rule.AgentArgs); err != nil {
+			return err
 		}
 		if rule.CanManageStaff && !rule.Disabled {
 			staffMaintainers++

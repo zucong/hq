@@ -225,6 +225,7 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 	fmt.Fprintln(&b, "10. `on_assignment` runtime 在 assignment 被验收/进入终态、keep-warm 到期且没有未决工作或行动型消息时可自动休眠。这不删除你的 seat、角色卡或工位；下次正式 issue 会 cold-resume 同一 seat。不得为了保持在线而延迟 report。")
 	fmt.Fprintln(&b, "11. Herdr 显示 done、离线或重启不等于业务完成；HQ ledger、assignment 状态和验收事件才是公司事实。")
 	fmt.Fprintln(&b, "12. 工具授权文本不能保证修改外部 connector 的 saved permission。若 connector 仍拒绝，立即 blocked；由有权方修改对应设置，必要时重连当前 runtime 后再按原 assignment 复验，禁止换 origin、surface 或 fallback 绕过。")
+	fmt.Fprintln(&b, "13. 若收到 `[HQ runtime recovery]`，这是 HQ 将同一 seat 的模型载体切换后发出的恢复信封，不是新任务。重读本手册、信封列出的 `assignment show`/`history` 和同一工位文件；只从 durable 状态继续，不臆造旧会话结论，不创建替代 case 或重复 assignment。")
 	if isManagerResponsibilities(rule.Responsibilities) {
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, "## 部门经理派工与激活（强制）")
@@ -284,6 +285,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "- **HQ case 与 Assignment Contract**：本次具体做什么、验收标准、负责人、reviewer 和 due。")
 	fmt.Fprintln(&b, "- **Herdr session 与 prompt**：启动或唤醒指定 seat，并递送 HQ 门铃；它本身不是业务授权。人类所有者或其明确授权代理可用 prompt 给已由 HQ 激活的会话补充外部工具权限，但不能创建或改写业务合同。")
 	fmt.Fprintln(&b, "\n简记：角色卡是岗位，Assignment 是合同，任务目录是工作台，Herdr Prompt 是门铃。")
+	fmt.Fprintln(&b, "如果模型供应商显示 `This content can't be shown`，启用了 `runtime_fallback` 的 HQ 会保守结束旧 runtime，在同一 seat/工位上启动备用载体，并以 `[HQ runtime recovery]` 重建 durable assignment/case 上下文。这不会复制隐藏聊天记录，也不改变角色或业务合同。")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "总裁秘书是 registry 中唯一 `approval_witness` 职责位，也是人类公司所有者与虚拟公司总部之间的双向沟通管道。具体 agent 名字和花名可配置，不参与权限判断。总裁秘书上传人类已经明确作出的决定、据此向部门经理下达公司级事项，并把已验收证据、风险和待决问题汇总给人类；不得代替人类决定组织变更、产品方向、优先级或风险接受。")
 
@@ -319,7 +321,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq accept --event <issue-event-id> --next <下一步>")
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq report --case <case-id> --result completed --artifact <路径> --verify <验证> --next <下一步>")
 	fmt.Fprintln(&b, "```")
-	fmt.Fprintln(&b, "\n员工只接受 HQ issue。`[HQ message]` 和 Turn Bundle 是有引用的上下文，不会建立 assignment；`question|request|handoff` 信封要求接收者读懂后执行 `hq message ack --message <message-id>`，ack 只证明收到，普通 `info` 无需 ack。未知投递状态按 delivery 恢复协议处理，不得另发一份业务命令。`on_assignment` 员工在交付终态、有界 keep-warm 到期且无未决工作后可自动休眠；休眠只关闭当前 Herdr runtime，不删除角色卡、工位、seat 或业务历史，下一次 issue 会自动复用该 seat。")
+	fmt.Fprintln(&b, "\n员工只接受 HQ issue。`[HQ message]` 和 Turn Bundle 是有引用的上下文，不会建立 assignment；`question|request|handoff` 信封要求接收者读懂后执行 `hq message ack --message <message-id>`，ack 只证明收到，普通 `info` 无需 ack。未知投递状态按 delivery 恢复协议处理，不得另发一份业务命令。`[HQ runtime recovery]` 只恢复同一 seat 的 durable 工作，接收者必须按其列出的查询命令重建上下文，不得重复接单或创建替代 case。`on_assignment` 员工在交付终态、有界 keep-warm 到期且无未决工作后可自动休眠；休眠只关闭当前 Herdr runtime，不删除角色卡、工位、seat 或业务历史，下一次 issue 会自动复用该 seat。")
 
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## 经理选择并激活角色")
