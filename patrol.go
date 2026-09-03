@@ -109,6 +109,9 @@ func (p *PatrolService) Run(ctx context.Context, cfg Config, hqRoot string, grac
 		if progressErr := addAssignmentProgressPatrolFindings(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); progressErr != nil {
 			return PatrolReport{}, fmt.Errorf("patrol assignment progress 分析失败：%w", progressErr)
 		}
+		if closureErr := addClosureQueuePatrolFinding(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); closureErr != nil {
+			return PatrolReport{}, fmt.Errorf("patrol closure queue 分析失败：%w", closureErr)
+		}
 	}
 	first.report.GraceMS = grace.Milliseconds()
 	needsSecond := false
@@ -431,6 +434,38 @@ func addManagerQueuePatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnaps
 			Message: fmt.Sprintf("manager status=%s 但仍有 %d 项 durable 待办；当前最高优先级 case=%s status=%s basis=%s；纠正：%s", status, len(backlog.Items), item.CaseID, item.Status, backlog.BasisEventID, managerQueueAction(item)),
 		})
 	}
+	analysis.report.Warnings = len(analysis.report.Findings)
+	sortPatrolFindings(analysis.report.Findings)
+	return nil
+}
+
+func addClosureQueuePatrolFinding(analysis *patrolAnalysis, snapshot HerdrSnapshot, cfg Config, hqRoot string, ledger *ledgerState, now time.Time) error {
+	backlog, err := ledger.closureQueueBacklog(cfg)
+	if err != nil || backlog == nil {
+		return err
+	}
+	status, statusErr := liveQueueTargetStatus(snapshot, cfg, hqRoot, backlog.Closer)
+	if statusErr != nil || (status != "idle" && status != "done") {
+		return nil
+	}
+	selectedAt, err := parseOperationsTime("closure queue selected_at", backlog.SelectedAt)
+	if err != nil {
+		return err
+	}
+	stallAfter, _, _ := cfg.managerQueueWatchdogPolicy()
+	if now.Sub(selectedAt) < stallAfter {
+		return nil
+	}
+	candidates, omitted := boundedClosureQueueCases(backlog.Items)
+	if omitted > 0 {
+		candidates += fmt.Sprintf(",...(+%d)", omitted)
+	}
+	addPatrolFinding(analysis, PatrolFinding{
+		Category: "stalled", ObjectID: "closure-queue:" + backlog.Closer, Agent: backlog.Closer,
+		SignalType: "idle_with_closure_backlog", Signals: strings.Split(candidates, ","),
+		Message: fmt.Sprintf("account_closer status=%s 但仍有 %d 个已验收case满足后序关闭前置；当前case=%s status=%s basis=%s；纠正：运行 hq case show --id %s 与 hq history --case %s，核验依据后显式 hq close；HQ不会自动关闭",
+			status, len(backlog.Items), backlog.Items[0].CaseID, backlog.Items[0].Status, backlog.BasisEventID, backlog.Items[0].CaseID, backlog.Items[0].CaseID),
+	})
 	analysis.report.Warnings = len(analysis.report.Findings)
 	sortPatrolFindings(analysis.report.Findings)
 	return nil

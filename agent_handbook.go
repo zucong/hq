@@ -268,6 +268,7 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 		fmt.Fprintln(&b, "5. **禁止代决**：不得把模型推断、默认值、沉默或秘书自己的偏好写成 owner decision。授权不完整、相互冲突或超出 scope 时，停止公司级推进并向人类回问。")
 		fmt.Fprintln(&b, "6. **批准快照**：approval 只能是 `one_time`，并冻结 case generation 和目标经理 seat。HQ 提示 stale/ABA/seat drift 时，不得重试旧 approval；按报错使用新 `approval_id` 重新 request。换岗前先 revoke 未完成的 request/grant。")
 		fmt.Fprintln(&b, "7. **接收部门 escalation**：经理上交的新 case 会处于 `escalated`，先 `hq accept --event <case_escalation_sent>`；确认人类授权后，再针对这个新 case request/grant approval 并 issue 给你的直属部门经理。不得替经理伪造子 case，也不得退回或改写旧 accepted report。工程证据验收后只向原部门经理 message 上下文，由该经理在仍持有的原 case 上 revise 新版本并 fresh issue 复验 seat；不得 message 原员工要求旧 assignment 再次 report。")
+		fmt.Fprintln(&b, "8. **后序销账**：收到 `HQ销账守卫` 后，先按提示运行 `hq case show --id <case-id>` 与 `hq history --case <case-id>`。只有 `accepted|finding_accepted` 且无活动合同、未决 workflow delivery 或未关闭 child 时，才可依据真实 source 执行 `hq close --case <case-id> --reason <原因> --source <依据>`；提醒不是关闭批准，禁止关闭 open/blocked/needs_decision。")
 	}
 	return []byte(b.String())
 }
@@ -326,7 +327,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq report --case <case-id> --result completed --artifact <路径> --verify <验证> --next <下一步>")
 	fmt.Fprintln(&b, "```")
 	fmt.Fprintln(&b, "\n员工只接受 HQ issue。`[HQ message]` 和 Turn Bundle 是有引用的上下文，不会建立 assignment；`question|request|handoff` 信封要求接收者读懂后执行 `hq message ack --message <message-id>`，ack 只证明收到，普通 `info` 无需 ack。未知投递状态按 delivery 恢复协议处理，不得另发一份业务命令。`[HQ runtime recovery]` 只恢复同一 seat 的 actionable durable 工作并最多展开 8 项；省略项通过 `hq inbox`/`hq assignment list` 查询。接收者必须按其列出的查询命令重建上下文，不得重复接单或创建替代 case。若原 assignment 仍为 accepted/rework 而员工已 idle/done，gateway 会以 `HQ执行守卫` durable nudge 要求其继续并 report；runtime 消失时可 cold-resume 同一 seat。人工 nudge 仍不能对普通员工派工。`on_assignment` 员工在交付终态、有界 keep-warm 到期且无未决工作后可自动休眠；休眠只关闭当前 Herdr runtime，不删除角色卡、工位、seat 或业务历史，下一次 issue 会自动复用该 seat。")
-	fmt.Fprintln(&b, "\n组织不依赖模型自觉维持队列。gateway 会对 idle/done 的专业员工核对 accepted/rework assignment，并对经理或总部联络职责位核对 durable submission、active assignment 和新建但尚未委派的 owned open case；accepted、blocked、escalated 等 case 不会仅因 owner 仍是经理而触发。超时后发送带精确命令的 durable nudge，有界重试后沿 `reports_to` 升级。这个机制只促使责任人收敛，不会自动 report、accept/return、改变 owner/status 或作质量判断。")
+	fmt.Fprintln(&b, "\n组织不依赖模型自觉维持队列。gateway 会对 idle/done 的专业员工核对 accepted/rework assignment，并对经理或总部联络职责位核对 durable submission、active assignment 和新建但尚未委派的 owned open case；accepted、blocked、escalated 等 case 不会仅因 owner 仍是经理而触发。另有销账守卫只把 `accepted|finding_accepted`、无活动合同/未决投递且 child 均已 closed 的后序候选提醒给唯一 `account_closer`；绝不选择 open/blocked/needs_decision。超时后发送带精确命令的 durable nudge并有界重试。所有守卫只促使责任人收敛，不会自动 report、accept/return/close、改变 owner/status 或作质量判断。")
 
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## 经理选择并激活角色")

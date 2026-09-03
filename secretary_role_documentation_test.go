@@ -33,6 +33,9 @@ func TestSecretaryRoleIsNamedByResponsibilityAndChannelsHumanDecisions(t *testin
 		"approval 只能是 `one_time`",
 		"新 `approval_id`",
 		"不得 message 原员工要求旧 assignment 再次 report",
+		"**后序销账**",
+		"HQ销账守卫",
+		"提醒不是关闭批准",
 	} {
 		if !strings.Contains(manual, want) {
 			t.Fatalf("secretary role manual missing %q:\n%s", want, manual)
@@ -56,6 +59,8 @@ func TestGenericHandbookAndDocsDoNotMakeSecretaryAProperName(t *testing.T) {
 		"向部门经理下达公司级事项",
 		"已验收证据、风险和待决问题汇总给人类",
 		"不得代替人类决定",
+		"销账守卫",
+		"不会自动 report、accept/return/close",
 	} {
 		if !strings.Contains(handbook, want) {
 			t.Fatalf("company handbook missing secretary contract %q:\n%s", want, handbook)

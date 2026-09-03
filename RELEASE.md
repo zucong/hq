@@ -65,12 +65,16 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
     accept/return 命令的 durable nudge，次数耗尽后沿 reports_to 升级；重复扫描不得重复 Prompt，ambiguous
     必须冻结并要求 reconcile，且整个过程不得替经理验收或改变业务状态；混合队列必须保持
     `review > work > owned_case`，旧 open case 不得遮蔽待审或返工。
-14. `staff list/get` 必须分别显示 ledger 实时 `active_wip`、registry 上限 `max_wip` 与实时
+14. 模拟 assignment 全部 completed、accepted case 长期未 close：closure queue watchdog 必须只选择无活动合同、
+    无未决 workflow delivery、child 已 closed 的 `accepted|finding_accepted` 后序候选，向唯一 account_closer
+    发送有界 durable nudge；`open|blocked|needs_decision` 必须排除，patrol 必须报告
+    `idle_with_closure_backlog`，且守卫不得自动 close、生成 reason/source 或改变业务状态。
+15. `staff list/get` 必须分别显示 ledger 实时 `active_wip`、registry 上限 `max_wip` 与实时
     `available_wip`；禁止再用无定义的 `WIP` 列让 Agent 把容量上限误当当前占用。
-15. 模拟员工 accept 后在 report 前遇到 gateway 重启或 runtime 消失：idle/done seat 必须收到绑定原
+16. 模拟员工 accept 后在 report 前遇到 gateway 重启或 runtime 消失：idle/done seat 必须收到绑定原
     assignment/history/report 动作的 durable progress nudge，离线 seat 必须以同一工位和 recovery envelope
     cold-resume；催办有界并沿 reports_to 升级，且不得代写 report、改变业务状态或开放人工 nudge 绕过 issue。
-16. 如配置 `runtime_profiles.codex`，验证新 thread 原生 argv 显式包含期望 model/effort；模拟在线
+17. 如配置 `runtime_profiles.codex`，验证新 thread 原生 argv 显式包含期望 model/effort；模拟在线
     thread 变为其他 model/effort，patrol 必须报 `runtime_profile_mismatch`，watcher 不中断
     working/blocked，只在 idle/done 关闭旧 tab、用同一 seat/workstation 启动并投递 durable recovery。
     ambiguous CloseTab 必须进入 `profile_repair_unknown`、不得启动第二个 runtime，且报错必须给出单 seat
@@ -123,6 +127,8 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
   ledger 防伪和 accept 后停止均通过测试。
 - 空闲经理的 durable actionable queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒、向上升级；同一
   queue basis 跨重启去重，系统不得自动 accept/return 或伪造质量结论。
+- 已验收且满足 post-order 前置的 closure queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒唯一
+  account_closer；同一 status event basis 跨重启去重，系统不得自动 close 或把 blocked/needs_decision 当作完成。
 - `on_assignment` seat 在原 assignment 仍未完成时，可由精确绑定的 report return 或合同 issuer 的 actionable
   message 从休眠中恢复；无关 case、非合同 actor、info message 不得取得启动权；prepared delivery reconcile
   必须复用原 ID 且至多 Prompt 一次。

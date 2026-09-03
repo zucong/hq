@@ -609,6 +609,13 @@ submission review、经理自己的 active assignment、以及无 active assignm
 若 Prompt 已尝试但结果不确定，则冻结该 nudge、禁止重投，并升级要求人工 reconcile。守卫不能代替 reviewer 执行
 accept/return，也不能改变业务状态；`patrol` 只额外报告 `stalled` finding。
 
+独立的 closure queue watchdog 处理验收与销账之间的控制面缺口。它只从严格重放结果选择
+`accepted|finding_accepted`、无 active assignment、目标无未收敛 workflow delivery、所有直属 child 已
+`closed` 的当前 post-order 叶节点；`open|blocked|needs_decision` 不进入候选。最早候选的 status event 是稳定
+basis，唯一 `account_closer` 只有在精确在岗且 `idle|done` 超时后才收到 durable nudge。提示展开至多 8 项并要求
+先 `case show/history`，再由销账人自行提供 reason/source 执行 `close`。watchdog 不写 `case_closed`、不创造关闭
+依据，也不把 finding 或提醒解释为批准；`patrol` 将未推进的队列报告为 `idle_with_closure_backlog`。
+
 ## 11. 事件账本与恢复
 
 当前权威事件只使用 event v3 envelope：

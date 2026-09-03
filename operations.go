@@ -423,7 +423,7 @@ func (a *App) cmdNudgeEnqueueWithScope(args []string, allowAssignmentWorker bool
 	id := fs.String("id", "", "稳定 nudge id")
 	dedupe := fs.String("dedupe", "", "未终结期间唯一 dedupe key")
 	target := fs.String("to", "", "精确登记的经理或总部联络职责位")
-	message := fs.String("message", "", "单行短提醒（≤200 rune）")
+	message := fs.String("message", "", "单行提醒（合法 UTF-8，≤2 KiB）")
 	ttl := fs.Duration("ttl", 15*time.Minute, "TTL（30s..24h）")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return fmt.Errorf("用法：hq nudge enqueue --id ID --dedupe KEY --to TARGET --message TEXT [--ttl 15m]")
@@ -432,7 +432,7 @@ func (a *App) cmdNudgeEnqueueWithScope(args []string, allowAssignmentWorker bool
 	if err != nil {
 		return err
 	}
-	cleanMessage, err := validateShortText("message", *message, true)
+	cleanMessage, err := validateBusinessText("message", *message, true)
 	if err != nil {
 		return err
 	}
