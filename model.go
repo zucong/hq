@@ -206,13 +206,14 @@ type RoleCard struct {
 }
 
 type Config struct {
-	Version         int                    `json:"version" yaml:"version"`
-	WorkspaceLabel  string                 `json:"workspace_label,omitempty" yaml:"workspace_label"`
-	OwnerPrincipal  string                 `json:"owner_principal,omitempty" yaml:"owner_principal"`
-	RoleCards       []RoleCard             `json:"role_cards,omitempty" yaml:"role_cards,omitempty"`
-	Agents          []AgentRule            `json:"agents" yaml:"agents"`
-	DeliveryPolicy  *DeliveryPolicy        `json:"delivery_policy,omitempty" yaml:"delivery_policy,omitempty"`
-	RuntimeFallback *RuntimeFallbackPolicy `json:"runtime_fallback,omitempty" yaml:"runtime_fallback,omitempty"`
+	Version         int                             `json:"version" yaml:"version"`
+	WorkspaceLabel  string                          `json:"workspace_label,omitempty" yaml:"workspace_label"`
+	OwnerPrincipal  string                          `json:"owner_principal,omitempty" yaml:"owner_principal"`
+	RoleCards       []RoleCard                      `json:"role_cards,omitempty" yaml:"role_cards,omitempty"`
+	Agents          []AgentRule                     `json:"agents" yaml:"agents"`
+	DeliveryPolicy  *DeliveryPolicy                 `json:"delivery_policy,omitempty" yaml:"delivery_policy,omitempty"`
+	RuntimeFallback *RuntimeFallbackPolicy          `json:"runtime_fallback,omitempty" yaml:"runtime_fallback,omitempty"`
+	RuntimeProfiles map[string]RuntimeProfilePolicy `json:"runtime_profiles,omitempty" yaml:"runtime_profiles,omitempty"`
 }
 
 type DeliveryPolicy struct {
@@ -238,6 +239,15 @@ type RuntimeFallbackPolicy struct {
 	ToKind         string   `json:"to_kind" yaml:"to_kind"`
 	PermissionMode string   `json:"permission_mode" yaml:"permission_mode"`
 	AgentArgs      []string `json:"agent_args,omitempty" yaml:"agent_args,omitempty"`
+}
+
+// RuntimeProfilePolicy is desired runtime state for a native Agent kind. It is
+// deliberately company-level rather than part of an employee seat: changing a
+// model carrier must not invalidate role cards, assignment contracts or WIP.
+type RuntimeProfilePolicy struct {
+	Model           string `json:"model" yaml:"model"`
+	ReasoningEffort string `json:"reasoning_effort" yaml:"reasoning_effort"`
+	OnDrift         string `json:"on_drift" yaml:"on_drift"`
 }
 
 func validateNativeAgentArgs(label string, args []string) error {
@@ -390,6 +400,9 @@ func validateConfig(cfg Config) error {
 		if err := validateNativeAgentArgs("runtime_fallback", policy.AgentArgs); err != nil {
 			return err
 		}
+	}
+	if err := validateRuntimeProfiles(cfg); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	roles := map[string]string{}

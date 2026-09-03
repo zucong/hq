@@ -519,7 +519,11 @@ func (a *App) startHQAgentAdmittedWithOptions(ctx context.Context, workspaceID s
 	if created.Tab.ID == "" || created.Pane.ID == "" {
 		return fmt.Errorf("tab create 未返回稳定 tab/pane id")
 	}
-	native := nativeAgentArgs(runtimeRule)
+	native, err := nativeAgentArgsForConfig(a.Config, runtimeRule)
+	if err != nil {
+		cleanupErr := a.closeOwnedTab(ctx, created.Tab.ID)
+		return combineLifecycleError(fmt.Errorf("编译员工 %s 的原生 runtime profile：%w", rule.Name, err), cleanupErr, created.Tab.ID)
+	}
 	start := a.Herdr.StartAgent(ctx, rule.Name, runtimeRule.Kind, created.Pane.ID, native)
 	for attempt := 0; start.Err != nil && start.Outcome == herdrDefinitelyNotRun && start.ErrorCode == "agent_pane_busy" && attempt < 19; attempt++ {
 		select {

@@ -19,16 +19,20 @@ import (
 const sessionEventVersion = 1
 
 const (
-	sessionStarted              = "started"
-	sessionStopped              = "stopped"
-	sessionHibernateAttempting  = "hibernate_attempting"
-	sessionHibernateDeferred    = "hibernate_deferred"
-	sessionHibernateFailed      = "hibernate_failed"
-	sessionHibernateUnknown     = "hibernate_unknown"
-	sessionFallbackAttempting   = "fallback_attempting"
-	sessionFallbackFailed       = "fallback_failed"
-	sessionFallbackUnknown      = "fallback_unknown"
-	sessionFallbackRecoverySent = "fallback_recovery_sent"
+	sessionStarted                 = "started"
+	sessionStopped                 = "stopped"
+	sessionHibernateAttempting     = "hibernate_attempting"
+	sessionHibernateDeferred       = "hibernate_deferred"
+	sessionHibernateFailed         = "hibernate_failed"
+	sessionHibernateUnknown        = "hibernate_unknown"
+	sessionFallbackAttempting      = "fallback_attempting"
+	sessionFallbackFailed          = "fallback_failed"
+	sessionFallbackUnknown         = "fallback_unknown"
+	sessionFallbackRecoverySent    = "fallback_recovery_sent"
+	sessionProfileRepairAttempting = "profile_repair_attempting"
+	sessionProfileRepairFailed     = "profile_repair_failed"
+	sessionProfileRepairUnknown    = "profile_repair_unknown"
+	sessionProfileRecoverySent     = "profile_recovery_sent"
 )
 
 type SessionEvent struct {
@@ -334,7 +338,8 @@ func (s *FileSessionStore) listUnlocked() ([]SessionEvent, error) {
 				}
 				stoppedByID[event.SessionID] = true
 			case sessionHibernateAttempting, sessionHibernateDeferred, sessionHibernateFailed, sessionHibernateUnknown,
-				sessionFallbackAttempting, sessionFallbackFailed, sessionFallbackUnknown, sessionFallbackRecoverySent:
+				sessionFallbackAttempting, sessionFallbackFailed, sessionFallbackUnknown, sessionFallbackRecoverySent,
+				sessionProfileRepairAttempting, sessionProfileRepairFailed, sessionProfileRepairUnknown, sessionProfileRecoverySent:
 				started, exists := startedByID[event.SessionID]
 				if !exists || stoppedByID[event.SessionID] {
 					return nil, fmt.Errorf("%s:%d session runtime 诊断必须引用 active start：%s", path, lineNo, event.SessionID)
@@ -395,8 +400,8 @@ func validateSessionEvent(event SessionEvent) error {
 	if event.Version != sessionEventVersion {
 		return fmt.Errorf("未知 session version：%d", event.Version)
 	}
-	if event.Type != sessionStarted && event.Type != sessionStopped && event.Type != sessionHibernateAttempting && event.Type != sessionHibernateDeferred && event.Type != sessionHibernateFailed && event.Type != sessionHibernateUnknown && event.Type != sessionFallbackAttempting && event.Type != sessionFallbackFailed && event.Type != sessionFallbackUnknown && event.Type != sessionFallbackRecoverySent {
-		return fmt.Errorf("session type 必须是 started|stopped|hibernate_attempting|hibernate_deferred|hibernate_failed|hibernate_unknown|fallback_attempting|fallback_failed|fallback_unknown|fallback_recovery_sent")
+	if event.Type != sessionStarted && event.Type != sessionStopped && event.Type != sessionHibernateAttempting && event.Type != sessionHibernateDeferred && event.Type != sessionHibernateFailed && event.Type != sessionHibernateUnknown && event.Type != sessionFallbackAttempting && event.Type != sessionFallbackFailed && event.Type != sessionFallbackUnknown && event.Type != sessionFallbackRecoverySent && event.Type != sessionProfileRepairAttempting && event.Type != sessionProfileRepairFailed && event.Type != sessionProfileRepairUnknown && event.Type != sessionProfileRecoverySent {
+		return fmt.Errorf("session type 必须是 started|stopped|hibernate_*|fallback_*|profile_repair_*|profile_recovery_sent")
 	}
 	if _, err := time.Parse(time.RFC3339, event.At); err != nil {
 		return fmt.Errorf("session time 必须是 RFC3339：%w", err)
@@ -513,7 +518,7 @@ func activeSessionStarts(events []SessionEvent) []SessionEvent {
 func latestSessionDiagnostic(events []SessionEvent, sessionID string) SessionEvent {
 	var latest SessionEvent
 	for _, event := range events {
-		if event.SessionID == sessionID && (event.Type == sessionHibernateAttempting || event.Type == sessionHibernateDeferred || event.Type == sessionHibernateFailed || event.Type == sessionHibernateUnknown || event.Type == sessionFallbackAttempting || event.Type == sessionFallbackFailed || event.Type == sessionFallbackUnknown || event.Type == sessionFallbackRecoverySent) {
+		if event.SessionID == sessionID && (event.Type == sessionHibernateAttempting || event.Type == sessionHibernateDeferred || event.Type == sessionHibernateFailed || event.Type == sessionHibernateUnknown || event.Type == sessionFallbackAttempting || event.Type == sessionFallbackFailed || event.Type == sessionFallbackUnknown || event.Type == sessionFallbackRecoverySent || event.Type == sessionProfileRepairAttempting || event.Type == sessionProfileRepairFailed || event.Type == sessionProfileRepairUnknown || event.Type == sessionProfileRecoverySent) {
 			latest = event
 		}
 	}
@@ -522,18 +527,18 @@ func latestSessionDiagnostic(events []SessionEvent, sessionID string) SessionEve
 
 func (a *App) cmdSession(args []string) error {
 	if len(args) == 0 || args[0] != "list" {
-		return fmt.Errorf("用法：hq session list [--session ID] [--agent NAME] [--type started|stopped|hibernate_*|fallback_*]")
+		return fmt.Errorf("用法：hq session list [--session ID] [--agent NAME] [--type started|stopped|hibernate_*|fallback_*|profile_*]")
 	}
 	fs := newLeafParser("session list")
 	fs.SetOutput(a.Err)
 	sessionID := fs.String("session", "", "按 session id 过滤")
 	agent := fs.String("agent", "", "按 agent 过滤")
-	eventType := fs.String("type", "", "按 started|stopped|hibernate_*|fallback_* 过滤")
+	eventType := fs.String("type", "", "按 started|stopped|hibernate_*|fallback_*|profile_* 过滤")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || (*eventType != "" && *eventType != sessionStarted && *eventType != sessionStopped && *eventType != sessionHibernateAttempting && *eventType != sessionHibernateDeferred && *eventType != sessionHibernateFailed && *eventType != sessionHibernateUnknown && *eventType != sessionFallbackAttempting && *eventType != sessionFallbackFailed && *eventType != sessionFallbackUnknown && *eventType != sessionFallbackRecoverySent) {
-		return fmt.Errorf("用法：hq session list [--session ID] [--agent NAME] [--type started|stopped|hibernate_*|fallback_*]")
+	if fs.NArg() != 0 || (*eventType != "" && *eventType != sessionStarted && *eventType != sessionStopped && *eventType != sessionHibernateAttempting && *eventType != sessionHibernateDeferred && *eventType != sessionHibernateFailed && *eventType != sessionHibernateUnknown && *eventType != sessionFallbackAttempting && *eventType != sessionFallbackFailed && *eventType != sessionFallbackUnknown && *eventType != sessionFallbackRecoverySent && *eventType != sessionProfileRepairAttempting && *eventType != sessionProfileRepairFailed && *eventType != sessionProfileRepairUnknown && *eventType != sessionProfileRecoverySent) {
+		return fmt.Errorf("用法：hq session list [--session ID] [--agent NAME] [--type started|stopped|hibernate_*|fallback_*|profile_*]")
 	}
 	if a.Sessions == nil {
 		return fmt.Errorf("session store 未注入")

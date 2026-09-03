@@ -234,6 +234,8 @@ staff mutation 调用，用候选配置核验 ledger。
 
 ```text
 Config v3
+├── runtime_profiles.<kind>            # optional desired native model/effort
+│   └── model / reasoning_effort / on_drift
 ├── runtime_fallback                  # optional process-carrier policy
 │   ├── auto / trigger: content_safeguard
 │   ├── from_kind / to_kind
@@ -259,6 +261,11 @@ Config v3
 version: 3
 workspace_label: example-hq
 owner_principal: ZC
+runtime_profiles:
+  codex:
+    model: gpt-5.6-sol
+    reasoning_effort: medium
+    on_drift: restart_idle
 runtime_fallback:
   auto: true
   trigger: content_safeguard
@@ -336,6 +343,7 @@ delivery_policy:
 - 至少一名在职 agent 具有 `can_manage_staff=true`；
 - 每名在职 seat 必须声明合法 Herdr `kind`，才能常驻或按需启动。
 - `permission_mode` 为 `yolo|native`；`native` 只传递显式 `agent_args`；`yolo` 会在显式参数后补齐该 kind 的必需自动授权 argv，不允许自定义参数意外降权。
+- 可选 `runtime_profiles.<kind>` 是公司级原生运行期望，不属于 employee seat；当前可核验 adapter 为 Codex，必须同时声明 `model`、`reasoning_effort` 和 `on_drift=report|restart_idle`。`restart_idle` 只在 `idle|done` 安全边界替换运行实例，不中断 `working|blocked`。
 - 可选 `runtime_fallback` 只替换稳定 seat 的模型运行载体，不修改 employee seat、Role Card、workstation 或 Assignment Contract；当 `auto=true` 时，HQ 只对可核验的 `content_safeguard` 终端状态触发一次保守切换。
 
 常用维护命令：
@@ -395,6 +403,7 @@ gateway 和 `always` 岗位；启动新 incarnation 前，它会用当前 Herdr 
 
 所有启动路径仍要求部门经理声明正确的 `manager:<department>`，tab label 精确使用 registry 的 runtime `sender_label`，
 且 agent cwd、kind、workspace、tab、pane 和 `interactive_ready` 均能由 Herdr snapshot 证明。
+如 registry 声明 `runtime_profiles`，HQ 还会把期望的 Codex model/effort 编译为显式原生 argv；这些显式值按 Codex 配置优先级覆盖宿主默认，避免新 thread 随全局配置漂移。
 
 ```bash
 HQ_COMPANY_ROOT=/path/to/company
@@ -651,6 +660,8 @@ durable case 前，平级或跨部门消息只会静默排队，不会唤醒或�
 
 `agents[].agent_args` 可显式配置传给 Herdr `agent start ... --` 后的原生 argv。`permission_mode=native`
 只传递这些参数；`permission_mode=yolo` 会在其后补齐 kind 的必需授权参数。
+如同时配置 `runtime_profiles.codex`，HQ 会在启动时补齐显式 `--model` 和
+`-c model_reasoning_effort="..."`；已有同值 `agent_args` 只保留一份，冲突值在任何 Herdr mutation 前被拒绝并给出纠正方法。
 HQ 为九种常用 kind 提供自动授权启动参数：
 
 - `claude`: `--dangerously-skip-permissions`
@@ -741,12 +752,13 @@ strict replay 会从持久化的真实 base payload 与 envelopes 重算每项 b
 ./bin/hq project show --project <case.project 的精确值>
 ./bin/hq patrol --json
 ./bin/hq session list --agent <slug> \
-  --type started|stopped|hibernate_attempting|hibernate_deferred|hibernate_failed|hibernate_unknown|fallback_attempting|fallback_failed|fallback_unknown|fallback_recovery_sent --json
+  --type started|stopped|hibernate_attempting|hibernate_deferred|hibernate_failed|hibernate_unknown|fallback_attempting|fallback_failed|fallback_unknown|fallback_recovery_sent|profile_repair_attempting|profile_repair_failed|profile_repair_unknown|profile_recovery_sent --json
 ./bin/hq --direct runtime status [--agent <slug>] [--json]
 ./bin/hq --direct runtime reap [--agent <slug>] [--json]
 ./bin/hq --direct runtime reap --agent <slug> --retry-failed
 ./bin/hq --direct runtime reap --agent <slug> --retry-unknown
 ./bin/hq --direct runtime fallback --agent <slug> [--retry-unknown]
+./bin/hq --direct runtime repair-profile --agent <slug> [--retry-unknown]
 ./bin/hq flow show --case <case-id> --json
 ./bin/hq index rebuild
 ./bin/hq index query --entity flow_events --case <case-id>
@@ -754,6 +766,7 @@ strict replay 会从持久化的真实 base payload 与 envelopes 重算每项 b
 
 - `doctor` 只读检查实例路径、registry、岗位手册、决策、Herdr、gateway 和账本健康；
 - `patrol` 使用两份 snapshot 区分 blocked、经理/员工 durable 队列 stalled、编制漂移、orphan 和持续死亡候选，不自动验收、代报、重启或关停；
+- 当配置 `runtime_profiles`时，`patrol` 额外读取有界 Herdr detection 终端，将实际 model/effort 不匹配报为 `runtime_profile_mismatch`；自动恢复由 gateway 守护执行，不是 patrol 的副作用。
 - `board` 展示结构化事项，`PRI` 列来自 case 规格的 `priority`，不会拿 finding `severity` 冒充事项优先级；`state.json` 缺失或损坏时可由账本重建；
 - `project list/show` 严格重放主账本；合法空间只会返回零个或一个冻结 `case.project`，department 分布由当前 registry 映射；
 - `assignment list/show` 展示冻结的委派、验收角色、due 和当前合同状态；
@@ -790,6 +803,23 @@ session 诊断流为 `started → hibernate_attempting → stopped`，可以保�
 若 agent 已消失但空 tab 仍在，HQ 会补记 runtime stopped，但不把空 tab 当作 HQ 拥有的当前
 incarnation 自动关闭。`runtime status/reap` 会持续显示 `orphan_tab_without_agent`，运维者应先运行
 `hq patrol`，核对后在 Herdr 人工清理该 tab。
+
+### Model/effort runtime profile
+
+`runtime_profiles.<kind>` 将原生模型载体与员工编制分层。对 Codex，HQ 启动时显式传入
+`--model` 和 `model_reasoning_effort`；巡检时从 Herdr detection 终端最后一个可解析 footer 读取实际值。
+因此只有 name/kind/cwd/tab/pane 正确但 model/effort 被运行时控制面切换的 thread，不再被误判为完全 healthy。
+
+`on_drift=report` 只产生 patrol finding。`on_drift=restart_idle` 由 gateway watcher 在精确 binding 仍一致且
+status 为 `idle|done` 时恢复；`working|blocked` 不会被中断。恢复共用 runtime-seat、ESTOP、up 和 current-registry
+租约，先记 `profile_repair_attempting`，只在 snapshot 证明旧 tab 消失后才写 `stopped` 并用同一
+seat/workstation 重建。新会话收到基于 durable assignment/case 的 recovery envelope，成功后写
+`profile_recovery_sent`；它不修改 Role Card、seat digest、assignment 或 WIP。
+
+CloseTab definitely-not-run 进入 `profile_repair_failed` 并可由 watcher 安全重试；结果不明则进入
+`profile_repair_unknown`，禁止自动启动第二个 runtime。运维角色核验同一 incarnation/tab 仍在后，使用
+`hq --direct runtime repair-profile --agent <slug> --retry-unknown`。如旧 tab 已消失，watcher 用 snapshot
+补记 stopped 并前滚，不再调用 CloseTab。
 
 ### 模型 safeguard 的运行载体 fallback
 

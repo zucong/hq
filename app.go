@@ -1752,6 +1752,7 @@ func printUsage(w io.Writer) {
   hq --direct runtime status [--agent AGENT]
   hq --direct runtime reap [--agent AGENT] [--retry-failed|--retry-unknown]
   hq --direct runtime fallback --agent AGENT [--retry-unknown]
+  hq --direct runtime repair-profile --agent AGENT [--retry-unknown]
   hq board [--all]
   hq doctor [--json]
   hq history --case ID

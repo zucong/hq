@@ -329,6 +329,12 @@ func (a *App) assessRuntimeSeatLocked(rule AgentRule, reconcile bool, retryFaile
 		case sessionFallbackFailed:
 			appendRuntimeBlocker(&assessment.view, "fallback_failed_safe_to_retry")
 			assessment.view.NextAction = "HQ 将在下一轮重新核验 terminal evidence；也可由 can_manage_staff 角色运行 hq --direct runtime fallback --agent " + rule.Name
+		case sessionProfileRepairAttempting, sessionProfileRepairUnknown:
+			appendRuntimeBlocker(&assessment.view, "profile_repair_unknown_requires_operator_verification")
+			assessment.view.NextAction = "先核验当前仍是同一 runtime incarnation/tab；确认后由 can_manage_staff 角色运行 hq --direct runtime repair-profile --agent " + rule.Name + " --retry-unknown"
+		case sessionProfileRepairFailed:
+			appendRuntimeBlocker(&assessment.view, "profile_repair_failed_safe_to_retry")
+			assessment.view.NextAction = "HQ 将在下一轮安全边界重新核验并重试 runtime profile 修复"
 		}
 	}
 
@@ -645,6 +651,8 @@ func (a *App) ensureRuntimeSeatOriginSafeLocked(agent string) error {
 			return conflictf("seat %s 的旧 runtime close 尚未收敛（session=%s latest=%s）；为避免延迟 CloseTab 杀掉新 Prompt，HQ 尚未写入新业务 origin/WIP。请由 can_manage_staff 运维角色先运行 hq --direct runtime status --agent %s；核验同一 incarnation/tab 仍在后运行 hq --direct runtime reap --agent %s --retry-unknown，再重试原命令", agent, started.SessionID, diagnostic.Type, agent, agent)
 		case sessionFallbackAttempting, sessionFallbackUnknown:
 			return conflictf("seat %s 的模型 fallback close 尚未收敛（session=%s latest=%s）；HQ 尚未写入新业务 origin/WIP。请由 can_manage_staff 运维角色先运行 hq --direct runtime status --agent %s 核验同一 Codex incarnation/tab；确认仍在后运行 hq --direct runtime fallback --agent %s --retry-unknown，再重试原命令", agent, started.SessionID, diagnostic.Type, agent, agent)
+		case sessionProfileRepairAttempting, sessionProfileRepairUnknown:
+			return conflictf("seat %s 的 runtime profile close 尚未收敛（session=%s latest=%s）；HQ 尚未写入新业务 origin/WIP。请由 can_manage_staff 运维角色核验同一 incarnation/tab；确认仍在后运行 hq --direct runtime repair-profile --agent %s --retry-unknown，再重试原命令", agent, started.SessionID, diagnostic.Type, agent)
 		case sessionHibernateFailed:
 			// definitely-not-run is safe to supersede once real work arrives. A
 			// deferred diagnostic clears the stale retry-failed requirement so the
@@ -714,8 +722,8 @@ func (a *App) reapRuntimeSeats(agent string, retryFailed, retryUnknown bool) (Ru
 }
 
 func (a *App) cmdRuntime(args []string) error {
-	if len(args) == 0 || (args[0] != "status" && args[0] != "reap" && args[0] != "fallback") {
-		return fmt.Errorf("用法：hq --direct runtime status|reap|fallback [--agent NAME]")
+	if len(args) == 0 || (args[0] != "status" && args[0] != "reap" && args[0] != "fallback" && args[0] != "repair-profile") {
+		return fmt.Errorf("用法：hq --direct runtime status|reap|fallback|repair-profile [--agent NAME]")
 	}
 	if a.MaintenanceActor == "" {
 		return permissionf("runtime lifecycle 仅允许已通过 can_manage_staff 运维白名单的 --direct 调用")
@@ -749,6 +757,19 @@ func (a *App) cmdRuntime(args []string) error {
 			return err
 		}
 		_, err := fmt.Fprintf(a.Out, "runtime fallback 已收敛：agent=%s；运行 hq session list --agent %s 核验 old stopped、new started 与 fallback_recovery_sent\n", *agent, *agent)
+		return err
+	}
+	if args[0] == "repair-profile" {
+		if strings.TrimSpace(*agent) == "" {
+			return fmt.Errorf("runtime repair-profile 必须显式指定单一 --agent NAME，禁止批量替换运行实例")
+		}
+		if *retryFailed {
+			return fmt.Errorf("runtime repair-profile 不接受 --retry-failed；definitely-not-run 会自动安全重试，只有 profile_repair_attempting|profile_repair_unknown 需要人工核验后使用 --retry-unknown")
+		}
+		if err := a.retryRuntimeProfileRepair(a.requestContext(), *agent, *retryUnknown); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(a.Out, "runtime profile 已收敛：agent=%s；运行 hq patrol 与 hq session list --agent %s 核验 model/effort、old stopped、new started 与 profile_recovery_sent\n", *agent, *agent)
 		return err
 	}
 	if args[0] == "status" {
@@ -812,6 +833,9 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 	}
 	if fallbackErr := child.recoverContentSafeguardsOnce(ctx); fallbackErr != nil {
 		fmt.Fprintf(a.Err, "[HQ runtime fallback] %v\n", fallbackErr)
+	}
+	if profileErr := child.recoverRuntimeProfileDriftsOnce(ctx); profileErr != nil {
+		fmt.Fprintf(a.Err, "[HQ runtime profile] %v\n", profileErr)
 	}
 	if activationErr := child.recoverIssuedAssignmentActivationsOnce(ctx); activationErr != nil {
 		fmt.Fprintf(a.Err, "[HQ assignment activation] %v\n", activationErr)

@@ -93,6 +93,7 @@ func (p *PatrolService) Run(ctx context.Context, cfg Config, hqRoot string, grac
 		return PatrolReport{}, err
 	}
 	first := analyzePatrolSnapshotWithFrozen(firstSnapshot, cfg, hqRoot, frozen)
+	addRuntimeProfilePatrolFindings(ctx, &first, firstSnapshot, cfg, hqRoot, p.Herdr)
 	if p.Store != nil {
 		events, readErr := p.Store.ReadAll(cfg)
 		if readErr != nil {

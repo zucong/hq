@@ -204,6 +204,8 @@ Config
 │   ├── manager_queue_stall_timeout
 │   ├── manager_queue_escalate_after
 │   └── max_manager_queue_nudges
+├── runtime_profiles.<kind>
+│   └── model / reasoning_effort / on_drift
 ├── runtime_fallback
 │   ├── auto / trigger
 │   ├── from_kind / to_kind
@@ -342,6 +344,23 @@ Herdr 当前 CloseTab 只接受 `tab_id`，不接受 expected terminal/native se
 flock 时重读 config、ledger/session 与最终 snapshot，从而拒绝已可观察的替换；但同用户在最终
 snapshot 与 CloseTab 之间的外部替换不能由 HQ 单方原子排除。这是明示 capability boundary；
 完全消除需要 Herdr conditional close/CAS，HQ 不把最终 snapshot 宣称为原子 close binding。
+
+### Runtime profile desired state
+
+`runtime_profiles.<kind>` 是公司级 native runtime desired state，不是 employee seat 属性。当前 Codex adapter
+把 `model` 和 `reasoning_effort` 编译成显式 CLI/config overrides，并从 Herdr 的有界 detection scrollback
+最后一个 footer 反查实际值。同 kind 的 seat-local `agent_args` 若声明相同值则去重；冲突值在
+Herdr mutation 前 fail closed。这个分层使运行载体变更不会改写 seat digest 或使在途 assignment 失效。
+
+patrol 将无法读取的 profile 报为 `runtime_profile_unverified`，将不匹配报为
+`runtime_profile_mismatch`。`on_drift=report` 仅报告；`restart_idle` 由 gateway watcher 仅在
+`idle|done` 边界修复，对 `working|blocked` 延后而不中断。修复使用与 hibernation/fallback 相同的
+runtime-seat、ESTOP admission、up 和 registry 锁序，并在 CloseTab 前二次核对 incarnation、status 和终端 profile。
+
+session 诊断为 `profile_repair_attempting|failed|unknown`。只有 snapshot 证明旧 tab absence 才记 stopped
+并用同 seat/workstation 启动新会话；recovery envelope 仅从严格重放的 assignment/case 恢复，投递后记
+`profile_recovery_sent`。unknown 禁止自动重试；只能在人工核验同一 incarnation/tab 后对单一 seat 执行
+`hq --direct runtime repair-profile --agent <seat> --retry-unknown`，避免延迟 CloseTab 与新 runtime 双占座。
 
 ### Runtime carrier fallback
 
@@ -566,6 +585,7 @@ lease、ack/reconcile；HQ 不把人工 consume 或本地 render 宣称为 exact
 新入职成员在收到直属经理首个 durable case 前，peer/cross-department message 强制静默排队。
 Agent 原生启动参数先传递 registry 的 `agent_args`；`permission_mode=yolo` 再为 claude/codex/copilot/cursor/
 gemini/grok/kimi/opencode/qwen 补齐该 kind 的必需自动授权 argv。未知 kind 不猜测参数。
+如存在 `runtime_profiles.<kind>`，最后编译经验证的显式 model/effort overrides；任何冲突都在启动 tab 前的 config validation 拒绝。
 不同 CLI 的“自动”语义并不完全等价；如需收紧权限，必须把 seat 显式改为 `permission_mode=native`，
 不得在声明为 `yolo` 的同时依靠自定义 argv 偶然降权。
 

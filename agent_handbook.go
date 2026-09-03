@@ -289,6 +289,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "- **Herdr session 与 prompt**：启动或唤醒指定 seat，并递送 HQ 门铃；它本身不是业务授权。人类所有者或其明确授权代理可用 prompt 给已由 HQ 激活的会话补充外部工具权限，但不能创建或改写业务合同。")
 	fmt.Fprintln(&b, "\n简记：角色卡是岗位，Assignment 是合同，任务目录是工作台，Herdr Prompt 是门铃。")
 	fmt.Fprintln(&b, "如果模型供应商显示 `This content can't be shown`，启用了 `runtime_fallback` 的 HQ 会保守结束旧 runtime，在同一 seat/工位上启动备用载体，并以 `[HQ runtime recovery]` 重建 durable assignment/case 上下文。这不会复制隐藏聊天记录，也不改变角色或业务合同。")
+	fmt.Fprintln(&b, "如果 `hq patrol` 报 `runtime_profile_mismatch`，说明当前 model/effort 与 registry 声明不符。HQ 只会在 idle|done 安全边界恢复，不中断 working|blocked；恢复仍使用同一 seat、角色卡、工位和 durable assignment。若报 `profile_repair_unknown`，由 can_manage_staff 角色核验同一 incarnation/tab 后按报错执行单 seat `hq --direct runtime repair-profile --agent <seat> --retry-unknown`；禁止裸 Herdr 重启。")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "总裁秘书是 registry 中唯一 `approval_witness` 职责位，也是人类公司所有者与虚拟公司总部之间的双向沟通管道。具体 agent 名字和花名可配置，不参与权限判断。总裁秘书上传人类已经明确作出的决定、据此向部门经理下达公司级事项，并把已验收证据、风险和待决问题汇总给人类；不得代替人类决定组织变更、产品方向、优先级或风险接受。")
 
@@ -352,6 +353,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq return --event <report-event-id> --reason <原因> --next <复交条件>")
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq --direct runtime status [--agent <direct-report-seat>]")
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq --direct runtime reap --agent <direct-report-seat> --retry-unknown")
+	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq --direct runtime repair-profile --agent <seat> --retry-unknown")
 	fmt.Fprintln(&b, "```")
 	fmt.Fprintln(&b, "\n`issue --to` 选择的是一个已批准、直属且有容量的 employee seat。HQ 在 assignment 中冻结 seat version/digest 与 role card version/digest/manual；任务执行期间不能被 prompt 或角色卡升级静默改变。`on_assignment` seat 平时休眠，经理发出正式 issue 时 HQ 会自动通过 Herdr cold-resume 并递送门铃；没有第二条业务 activate 命令，不得显式 `hq up <on_assignment-seat>`，也不要另发裸 `herdr prompt` 派工。人类所有者或其明确授权代理可以在 seat 已由 HQ 激活后，用 Herdr prompt 补充精确外部工具权限；这不创建或改变 case/issue/assignment、digest、reviewer 或 acceptance。交付被验收后，没有未决任务/投递/行动型消息的 runtime 会在 keep-warm 后自动休眠，但 seat、角色卡和工位仍保留。若新 issue 因 `hibernate_attempting`/`hibernate_unknown` 被拒绝，该命令尚未写 origin 或预占 WIP；先执行 `runtime status --agent ...`，人工核对同一 incarnation 后再按报错用单 seat `--retry-unknown`，不得绕过。HQ 拒绝其他命令时，同样应按报错给出的纠正命令执行，不得继续申请 approval 或用 Herdr 绕过。")
 	fmt.Fprintln(&b, "\n跨部门返工不能倒转旧 `accepted` report，`message --kind handoff` 也不转移 durable owner。父 case 当前经理运行 `case escalate` 后，HQ 原子创建新子 case 并固定上交其 `reports_to`；直属上级先 accept 该 escalation，再按公司级 owner approval/standing decision issue 给自己的直属部门经理。failed/unknown 投递只恢复原 delivery，不重复创建 case。")
