@@ -438,7 +438,11 @@ func buildInitPlan(root string, opts initOptions) (initPlan, error) {
 		roleCards = append(roleCards, card)
 	}
 	cfg := Config{Version: registrySchemaVersion, WorkspaceLabel: opts.Workspace, OwnerPrincipal: opts.Owner, RoleCards: roleCards, Agents: agents,
-		DeliveryPolicy: &DeliveryPolicy{DefaultMode: "auto", MaxConsecutiveWakes: 3}}
+		DeliveryPolicy: &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 3,
+			MaxBundleItems: defaultDeliveryBundleItems, MaxBundleBytes: defaultDeliveryBundleBytes,
+			AssignmentAcceptTimeout: defaultAssignmentAcceptTimeout.String(), MaxActivationRedeliveries: defaultMaxActivationRedeliveries,
+			ManagerQueueStallTimeout: defaultManagerQueueStallTimeout.String(), ManagerQueueEscalateAfter: defaultManagerQueueEscalateAfter.String(),
+			MaxManagerQueueNudges: defaultMaxManagerQueueNudges}}
 	if err := validateConfig(cfg); err != nil {
 		return initPlan{}, fmt.Errorf("模板生成了无效配置：%w", err)
 	}

@@ -300,7 +300,10 @@ func TestDeliveryPolicyConfigRuntimeIdentityAndPathFailClosed(t *testing.T) {
 		cfg := testConfig()
 		policy := cfg.effectiveDeliveryPolicy()
 		if policy.DefaultMode != deliveryModeWakeup || policy.MaxConsecutiveWakes != 3 ||
-			policy.MaxBundleItems != defaultDeliveryBundleItems || policy.MaxBundleBytes != defaultDeliveryBundleBytes {
+			policy.MaxBundleItems != defaultDeliveryBundleItems || policy.MaxBundleBytes != defaultDeliveryBundleBytes ||
+			policy.ManagerQueueStallTimeout != defaultManagerQueueStallTimeout.String() ||
+			policy.ManagerQueueEscalateAfter != defaultManagerQueueEscalateAfter.String() ||
+			policy.MaxManagerQueueNudges != defaultMaxManagerQueueNudges {
 			t.Fatalf("missing policy defaults=%+v", policy)
 		}
 		cfg.DeliveryPolicy = &DeliveryPolicy{DefaultMode: "bad", MaxConsecutiveWakes: 3}
@@ -318,6 +321,19 @@ func TestDeliveryPolicyConfigRuntimeIdentityAndPathFailClosed(t *testing.T) {
 		cfg.DeliveryPolicy = &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 3, MaxBundleBytes: maxDeliveryBundleBytes + 1}
 		if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "max_bundle_bytes") {
 			t.Fatalf("illegal bundle byte limit accepted: %v", err)
+		}
+		cfg.DeliveryPolicy = &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 3, ManagerQueueStallTimeout: "14s"}
+		if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "manager_queue_stall_timeout") {
+			t.Fatalf("illegal manager queue stall timeout accepted: %v", err)
+		}
+		cfg.DeliveryPolicy = &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 3,
+			ManagerQueueStallTimeout: "30s", ManagerQueueEscalateAfter: "30s"}
+		if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "必须大于") {
+			t.Fatalf("non-increasing manager escalation timeout accepted: %v", err)
+		}
+		cfg.DeliveryPolicy = &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 3, MaxManagerQueueNudges: 6}
+		if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "max_manager_queue_nudges") {
+			t.Fatalf("unbounded manager queue nudge count accepted: %v", err)
 		}
 	})
 

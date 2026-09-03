@@ -222,6 +222,9 @@ type DeliveryPolicy struct {
 	MaxBundleBytes            int    `json:"max_bundle_bytes,omitempty" yaml:"max_bundle_bytes,omitempty"`
 	AssignmentAcceptTimeout   string `json:"assignment_accept_timeout,omitempty" yaml:"assignment_accept_timeout,omitempty"`
 	MaxActivationRedeliveries int    `json:"max_activation_redeliveries,omitempty" yaml:"max_activation_redeliveries,omitempty"`
+	ManagerQueueStallTimeout  string `json:"manager_queue_stall_timeout,omitempty" yaml:"manager_queue_stall_timeout,omitempty"`
+	ManagerQueueEscalateAfter string `json:"manager_queue_escalate_after,omitempty" yaml:"manager_queue_escalate_after,omitempty"`
+	MaxManagerQueueNudges     int    `json:"max_manager_queue_nudges,omitempty" yaml:"max_manager_queue_nudges,omitempty"`
 }
 
 // RuntimeFallbackPolicy changes only the process that occupies a stable HQ
@@ -350,6 +353,28 @@ func validateConfig(cfg Config) error {
 		}
 		if value := cfg.DeliveryPolicy.MaxActivationRedeliveries; value < 0 || value > 10 {
 			return fmt.Errorf("delivery_policy.max_activation_redeliveries 必须省略/为 0，或在 1..10")
+		}
+		stall := defaultManagerQueueStallTimeout
+		if value := strings.TrimSpace(cfg.DeliveryPolicy.ManagerQueueStallTimeout); value != "" {
+			duration, err := time.ParseDuration(value)
+			if err != nil || duration < 15*time.Second || duration > time.Hour {
+				return fmt.Errorf("delivery_policy.manager_queue_stall_timeout 必须是 15s..1h 的 Go duration")
+			}
+			stall = duration
+		}
+		escalate := defaultManagerQueueEscalateAfter
+		if value := strings.TrimSpace(cfg.DeliveryPolicy.ManagerQueueEscalateAfter); value != "" {
+			duration, err := time.ParseDuration(value)
+			if err != nil || duration < 30*time.Second || duration > 24*time.Hour {
+				return fmt.Errorf("delivery_policy.manager_queue_escalate_after 必须是 30s..24h 的 Go duration")
+			}
+			escalate = duration
+		}
+		if escalate <= stall {
+			return fmt.Errorf("delivery_policy.manager_queue_escalate_after 必须大于 manager_queue_stall_timeout")
+		}
+		if value := cfg.DeliveryPolicy.MaxManagerQueueNudges; value < 0 || value > 5 {
+			return fmt.Errorf("delivery_policy.max_manager_queue_nudges 必须省略/为 0，或在 1..5")
 		}
 	}
 	if policy := cfg.RuntimeFallback; policy != nil {

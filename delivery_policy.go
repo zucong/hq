@@ -25,6 +25,9 @@ const (
 	defaultDeliveryBundleBytes       = 16 * 1024
 	defaultAssignmentAcceptTimeout   = 2 * time.Minute
 	defaultMaxActivationRedeliveries = 2
+	defaultManagerQueueStallTimeout  = 2 * time.Minute
+	defaultManagerQueueEscalateAfter = 10 * time.Minute
+	defaultMaxManagerQueueNudges     = 2
 	maxDeliveryBundleItems           = 100
 	maxDeliveryBundleBytes           = 1024 * 1024
 	maxTurnBundleBaseBytes           = 64 * 1024
@@ -147,7 +150,10 @@ func (c Config) effectiveDeliveryPolicy() DeliveryPolicy {
 		return DeliveryPolicy{DefaultMode: deliveryModeWakeup, MaxConsecutiveWakes: 3,
 			MaxBundleItems: defaultDeliveryBundleItems, MaxBundleBytes: defaultDeliveryBundleBytes,
 			AssignmentAcceptTimeout:   defaultAssignmentAcceptTimeout.String(),
-			MaxActivationRedeliveries: defaultMaxActivationRedeliveries}
+			MaxActivationRedeliveries: defaultMaxActivationRedeliveries,
+			ManagerQueueStallTimeout:  defaultManagerQueueStallTimeout.String(),
+			ManagerQueueEscalateAfter: defaultManagerQueueEscalateAfter.String(),
+			MaxManagerQueueNudges:     defaultMaxManagerQueueNudges}
 	}
 	policy := *c.DeliveryPolicy
 	if policy.MaxBundleItems == 0 {
@@ -162,7 +168,29 @@ func (c Config) effectiveDeliveryPolicy() DeliveryPolicy {
 	if policy.MaxActivationRedeliveries == 0 {
 		policy.MaxActivationRedeliveries = defaultMaxActivationRedeliveries
 	}
+	if strings.TrimSpace(policy.ManagerQueueStallTimeout) == "" {
+		policy.ManagerQueueStallTimeout = defaultManagerQueueStallTimeout.String()
+	}
+	if strings.TrimSpace(policy.ManagerQueueEscalateAfter) == "" {
+		policy.ManagerQueueEscalateAfter = defaultManagerQueueEscalateAfter.String()
+	}
+	if policy.MaxManagerQueueNudges == 0 {
+		policy.MaxManagerQueueNudges = defaultMaxManagerQueueNudges
+	}
 	return policy
+}
+
+func (c Config) managerQueueWatchdogPolicy() (time.Duration, time.Duration, int) {
+	policy := c.effectiveDeliveryPolicy()
+	stall, err := time.ParseDuration(policy.ManagerQueueStallTimeout)
+	if err != nil {
+		stall = defaultManagerQueueStallTimeout
+	}
+	escalate, err := time.ParseDuration(policy.ManagerQueueEscalateAfter)
+	if err != nil {
+		escalate = defaultManagerQueueEscalateAfter
+	}
+	return stall, escalate, policy.MaxManagerQueueNudges
 }
 
 func (c Config) assignmentAcceptTimeout() time.Duration {

@@ -311,6 +311,9 @@ delivery_policy:
   max_bundle_bytes: 16384
   assignment_accept_timeout: 2m
   max_activation_redeliveries: 2
+  manager_queue_stall_timeout: 2m
+  manager_queue_escalate_after: 10m
+  max_manager_queue_nudges: 2
 ```
 
 主要约束：
@@ -537,6 +540,15 @@ assignment event 和原始 payload 有界重投，最多 `max_activation_redeliv
 经理或 `can_manage_staff` 角色先运行 `hq delivery status --id ...`；unknown 用原 `delivery resolve` 核对，
 确认未送达或 exhausted 时用原 `delivery retry`。不得创建第二个 case/assignment，也不得用裸 prompt 补派。
 
+经理和总部联络职责位不能只靠角色手册自觉清空队列。gateway 的 manager queue watchdog 会严格重放账本，
+识别三类 durable 待办：等待 accept/return 的下属 submission、经理本人尚未接单或尚未 report 的 assignment，
+以及经理持有但没有 active assignment 的未关闭 case。只有目标精确在岗且 Herdr 状态为 `idle|done`，最老待办
+又超过 `manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。相同最老 status event
+作为稳定 basis；提醒至少间隔一个 stall timeout，最多 `max_manager_queue_nudges` 次。最后一次提醒后仍超过
+`manager_queue_escalate_after`，HQ 会把问题升级给 registry 中的 `reports_to`。Prompt 结果不确定时禁止自动重投，
+并升级要求核对 `nudge status/reconcile`。这个守卫只推动负责人作出决定，绝不自动 accept/return、改变 owner/status
+或生成质量结论。`hq patrol --json` 同时以 `stalled` finding 显示这类“人已空闲、durable 队列未清”的状态。
+
 跨部门返工不是对旧 `accepted` report 执行 `return`，也不是一条 `message --kind handoff`。前者会倒转
 审计终态，后者不会改变 durable owner。当前持有父 case 的部门经理使用 `case escalate`；HQ 在一个原子
 事务中创建新子 case 并记录 `case_escalation_prepared`，送达后新子 case 进入 `escalated`、owner 固定为
@@ -725,12 +737,12 @@ strict replay 会从持久化的真实 base payload 与 envelopes 重算每项 b
 ```
 
 - `doctor` 只读检查实例路径、registry、岗位手册、决策、Herdr、gateway 和账本健康；
-- `patrol` 使用两份 snapshot 区分 blocked、编制漂移、orphan 和持续死亡候选，不自动重启或关停；
+- `patrol` 使用两份 snapshot 区分 blocked、经理队列 stalled、编制漂移、orphan 和持续死亡候选，不自动验收、重启或关停；
 - `board` 展示结构化事项，`PRI` 列来自 case 规格的 `priority`，不会拿 finding `severity` 冒充事项优先级；`state.json` 缺失或损坏时可由账本重建；
 - `project list/show` 严格重放主账本；合法空间只会返回零个或一个冻结 `case.project`，department 分布由当前 registry 映射；
 - `assignment list/show` 展示冻结的委派、验收角色、due 和当前合同状态；
 - `index` 只提供固定字段查询，不开放任意 SQL；
-- `nudge` 和 `reminder` 负责回合边界提醒，不改变 case 权限和业务结论；
+- `nudge` 和 `reminder` 负责回合边界提醒，可唤醒精确在岗的 `working|idle|done` 经理或总部联络职责位，但不改变 case 权限和业务结论；
 - `estop` 冻结非豁免子角色，并以显式 release 精确恢复本次确认冻结集。
 
 ### On-assignment runtime 休眠

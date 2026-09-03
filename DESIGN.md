@@ -200,7 +200,10 @@ Config
 │   ├── max_bundle_items
 │   ├── max_bundle_bytes
 │   ├── assignment_accept_timeout
-│   └── max_activation_redeliveries
+│   ├── max_activation_redeliveries
+│   ├── manager_queue_stall_timeout
+│   ├── manager_queue_escalate_after
+│   └── max_manager_queue_nudges
 ├── runtime_fallback
 │   ├── auto / trigger
 │   ├── from_kind / to_kind
@@ -559,10 +562,18 @@ gemini/grok/kimi/opencode/qwen 补齐该 kind 的必需自动授权 argv。未�
 ### Nudge 与 Reminder
 
 `nudge` 在统一账本内提供 TTL、active dedupe、原子 lease 和人工 reconcile。投递前必须再次确认目标是
-精确在岗且处于可投递状态的常驻经理。
+精确在岗且处于 `working|idle|done` 的经理或唯一总部联络职责位。因此，目标在回合结束后进入 idle/done
+仍然可以由 HQ 唤醒；角色手册不是唯一恢复机制。
 
 `reminder scan` 以 case 的 `last_event_id/updated_at/owner` 为 basis，同一生命周期最多提醒一次。
 它不会自动关闭 case、改变 owner/status、生成批准或作质量结论。
+
+gateway 的 manager queue watchdog 将 ledger 的 assignment/case 投影与 Herdr live binding 联合判断。它把
+submission review、经理自己的 active assignment、以及无 active assignment 的经理持有 open case 视为 actionable
+队列；只在精确目标为 idle/done 且最老 status event 超时后工作。每个 `manager + oldest status event + stage`
+形成 nudge dedupe key，提醒次数有界且跨重启恢复。额度耗尽后，守卫沿 `reports_to` 向上生成一次 durable escalation。
+若 Prompt 已尝试但结果不确定，则冻结该 nudge、禁止重投，并升级要求人工 reconcile。守卫不能代替 reviewer 执行
+accept/return，也不能改变业务状态；`patrol` 只额外报告 `stalled` finding。
 
 ## 11. 事件账本与恢复
 
@@ -616,7 +627,7 @@ SQLite 只存 Markdown 路径/分类/机械元数据，以及严格重放得到�
 ## 13. 运行健康与急停
 
 `doctor` 汇总实例锚点、registry、岗位手册、决策、Herdr、gateway、账本和 company health；全程只读。
-`patrol` 读取两份 snapshot，报告 blocked、编制漂移、orphan 和持续死亡候选。单一信号或短暂 blocked
+`patrol` 读取两份 snapshot，并结合只读 ledger 投影报告 blocked、经理队列 stalled、编制漂移、orphan 和持续死亡候选。单一信号或短暂 blocked
 不会被直接判断为死亡，patrol 也不自动处置。
 
 ESTOP 先持久化稳定冻结集与 active intent，再关闭非豁免子角色。精确在岗的经理和唯一

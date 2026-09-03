@@ -176,6 +176,7 @@ func acceptTargetState(original Event) (string, error) {
 
 type caseAssignment struct {
 	EventID             string
+	StatusEventID       string
 	AssignmentID        string
 	AssignmentDigest    string
 	ContractVersion     int
@@ -1192,7 +1193,7 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 			if assignment.SubmissionEventID != prepared.ID {
 				return fmt.Errorf("assignment %s report_sent 未匹配本轮冻结 submission", assignment.AssignmentID)
 			}
-			assignment.Status = "submitted"
+			assignment.Status, assignment.StatusEventID = "submitted", event.ID
 		}
 
 	case "event_accepted", "event_returned":
@@ -1288,18 +1289,18 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 		s.resolved[originalEvent.ID] = true
 		if assignment := s.assignments[originalEvent.ID]; assignment != nil {
 			if event.Type == "event_accepted" {
-				assignment.Accepted, assignment.Status = true, "accepted"
+				assignment.Accepted, assignment.Status, assignment.StatusEventID = true, "accepted", event.ID
 			} else {
-				assignment.Consumed, assignment.Status = true, "returned"
+				assignment.Consumed, assignment.Status, assignment.StatusEventID = true, "returned", event.ID
 			}
 		}
 		if original.Type == "report_sent" && original.AssignmentEventID != "" {
 			assignment := s.assignments[original.AssignmentEventID]
 			if assignment != nil {
 				if event.Type == "event_accepted" {
-					assignment.Consumed, assignment.Status, assignment.SubmissionEventID = true, "completed", ""
+					assignment.Consumed, assignment.Status, assignment.StatusEventID, assignment.SubmissionEventID = true, "completed", event.ID, ""
 				} else {
-					assignment.Accepted, assignment.Consumed, assignment.Status = true, false, "rework"
+					assignment.Accepted, assignment.Consumed, assignment.Status, assignment.StatusEventID = true, false, "rework", event.ID
 					assignment.SubmissionGeneration, assignment.SubmissionEventID = event.ID, ""
 				}
 			}

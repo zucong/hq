@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -26,6 +27,46 @@ func (s *ledgerState) assignmentCapacityUsed(assignee string) int {
 		}
 	}
 	return used
+}
+
+func (s *ledgerState) assignmentCapacityGuidance(assignee, actor string) string {
+	items := make([]string, 0)
+	for _, eventID := range s.assignmentList {
+		assignment := s.assignments[eventID]
+		if assignment == nil || assignment.Recipient != assignee || assignment.Consumed {
+			continue
+		}
+		switch assignment.Status {
+		case "submitted":
+			reviewEvent := s.assignmentReviewEventID(assignment)
+			if assignment.Acceptor == actor {
+				items = append(items, fmt.Sprintf("%s case=%s status=submitted：你是 acceptor；核验证据后运行 `hq accept --event %s --next TEXT`，不合格则运行 `hq return --event %s --reason TEXT --next TEXT`", assignment.AssignmentID, assignment.CaseID, reviewEvent, reviewEvent))
+			} else {
+				items = append(items, fmt.Sprintf("%s case=%s status=submitted：等待 acceptor=%s 对 report event=%s 执行 accept/return", assignment.AssignmentID, assignment.CaseID, assignment.Acceptor, reviewEvent))
+			}
+		case "issued":
+			deliveryID := "DELIVERY_ID"
+			for _, record := range s.deliveries {
+				if record != nil && record.Terminal.ID == assignment.EventID {
+					deliveryID = record.Origin.DeliveryID
+					break
+				}
+			}
+			items = append(items, fmt.Sprintf("%s case=%s status=issued：assignee=%s 尚未接单；运行 `hq delivery status --id %s`，不得新建重复 assignment", assignment.AssignmentID, assignment.CaseID, assignment.Recipient, deliveryID))
+		case "accepted", "rework":
+			items = append(items, fmt.Sprintf("%s case=%s status=%s：assignee=%s 必须在原合同下继续并运行 `hq report --case %s ...`；经理可用 `hq message --to %s --kind request --case %s --text TEXT` 催办", assignment.AssignmentID, assignment.CaseID, assignment.Status, assignment.Recipient, assignment.CaseID, assignment.Recipient, assignment.CaseID))
+		default:
+			items = append(items, fmt.Sprintf("%s case=%s status=%s：先运行 `hq assignment show --id %s` 与 `hq history --case %s`", assignment.AssignmentID, assignment.CaseID, assignment.Status, assignment.AssignmentID, assignment.CaseID))
+		}
+	}
+	for _, record := range s.deliveries {
+		if record == nil || record.Origin.Type != "issue_prepared" || record.Origin.Recipient != assignee || record.Status == deliverySent {
+			continue
+		}
+		items = append(items, fmt.Sprintf("pending delivery=%s case=%s status=%s：运行 `hq delivery status --id %s`，严格按 next_action 恢复", record.Origin.DeliveryID, record.Origin.CaseID, record.Status, record.Origin.DeliveryID))
+	}
+	sort.Strings(items)
+	return strings.Join(items, "；")
 }
 
 // issueHierarchyViolation explains how to recover without weakening the
@@ -158,7 +199,7 @@ func (a *App) cmdIssue(args []string) error {
 			return nil, err
 		}
 		if used := ledger.assignmentCapacityUsed(targetRule.Name); used >= targetRule.MaxWIP {
-			return nil, conflictf("员工 %s 当前 assignment capacity=%d，已达到 max_wip=%d；其中待送达 issue 也会保留容量，请先完成或收敛现有委派", targetRule.Name, used, targetRule.MaxWIP)
+			return nil, conflictf("员工 %s 当前 assignment capacity=%d，已达到 max_wip=%d；待送达 issue 也会保留容量。先运行 `hq assignment list --assignee %s`；阻塞项：%s。完成上述 accept/return/report/delivery 收敛后，只重试当前 `hq issue`；不要创建重复 case/assignment，也不要改用裸 herdr prompt", targetRule.Name, used, targetRule.MaxWIP, targetRule.Name, ledger.assignmentCapacityGuidance(targetRule.Name, actor.Name))
 		}
 		if err := validateStateTransition(actionIssue, state.Status, string(statusDispatched)); err != nil {
 			return nil, err

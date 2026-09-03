@@ -137,3 +137,6 @@ delivery_policy:
     max_bundle_bytes: 16384
     assignment_accept_timeout: 2m
     max_activation_redeliveries: 2
+    manager_queue_stall_timeout: 2m
+    manager_queue_escalate_after: 10m
+    max_manager_queue_nudges: 2

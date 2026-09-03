@@ -145,6 +145,10 @@ func nudgeStateActive(state string) bool {
 	}
 }
 
+func isNudgeRecipient(cfg Config, rule AgentRule) bool {
+	return !rule.Disabled && (cfg.isManager(rule) || rule.hasResponsibility(roleApprovalWitness) || rule.hasResponsibility(roleAccountCloser))
+}
+
 func (s *ledgerState) applyNudgeEvent(event Event, cfg Config) error {
 	if err := requireNoStateFields(event); err != nil {
 		return err
@@ -169,8 +173,8 @@ func (s *ledgerState) applyNudgeEvent(event Event, cfg Config) error {
 			return fmt.Errorf("%s 含非法关联/claim/resolution 字段", event.Type)
 		}
 		recipient, ok := configRuleIncludingDisabled(cfg, event.Recipient)
-		if !ok || !cfg.isManager(recipient) {
-			return fmt.Errorf("nudge recipient %s 必须是精确登记常驻经理", event.Recipient)
+		if !ok || !isNudgeRecipient(cfg, recipient) {
+			return fmt.Errorf("nudge recipient %s 必须是精确登记的常驻经理或总部联络职责位", event.Recipient)
 		}
 		expires, err := parseOperationsTime("expires_at", event.ExpiresAt)
 		if err != nil || !expires.After(now) {
@@ -410,11 +414,11 @@ func (a *App) cmdNudgeEnqueue(args []string) error {
 	fs.SetOutput(a.Err)
 	id := fs.String("id", "", "稳定 nudge id")
 	dedupe := fs.String("dedupe", "", "未终结期间唯一 dedupe key")
-	target := fs.String("to", "", "精确登记常驻经理")
+	target := fs.String("to", "", "精确登记的经理或总部联络职责位")
 	message := fs.String("message", "", "单行短提醒（≤200 rune）")
 	ttl := fs.Duration("ttl", 15*time.Minute, "TTL（30s..24h）")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return fmt.Errorf("用法：hq nudge enqueue --id ID --dedupe KEY --to MANAGER --message TEXT [--ttl 15m]")
+		return fmt.Errorf("用法：hq nudge enqueue --id ID --dedupe KEY --to TARGET --message TEXT [--ttl 15m]")
 	}
 	actor, err := a.nudgeActor()
 	if err != nil {
@@ -435,8 +439,8 @@ func (a *App) cmdNudgeEnqueue(args []string) error {
 		return fmt.Errorf("--ttl 必须在 %s..%s", minimumNudgeTTL, maximumNudgeTTL)
 	}
 	rule, ok := a.Config.exactRule(strings.TrimSpace(*target))
-	if !ok || !a.Config.isManager(rule) {
-		return fmt.Errorf("--to 必须是精确登记、在职常驻经理")
+	if !ok || !isNudgeRecipient(a.Config, rule) {
+		return fmt.Errorf("--to 必须是精确登记的在职常驻经理或总部联络职责位")
 	}
 	now := a.operationsNow()
 	commandID := stableCommandID("nudge-enqueue", cleanID)
@@ -553,10 +557,10 @@ func (a *App) cmdNudgeStatus(args []string) error {
 	return a.output(view, fmt.Sprintf("nudge=%s state=%s recipient=%s", view.NudgeID, view.State, view.Recipient))
 }
 
-func exactWorkingManager(snapshot HerdrSnapshot, cfg Config, hqRoot, recipient string) error {
+func exactNudgeRecipient(snapshot HerdrSnapshot, cfg Config, hqRoot, recipient string) error {
 	rule, ok := cfg.exactRule(recipient)
-	if !ok || !cfg.isManager(rule) {
-		return fmt.Errorf("recipient %s 不再是精确登记在职经理", recipient)
+	if !ok || !isNudgeRecipient(cfg, rule) {
+		return fmt.Errorf("recipient %s 不再是精确登记的常驻经理或总部联络职责位", recipient)
 	}
 	var workspaceIDs []string
 	for _, workspace := range snapshot.Workspaces {
@@ -572,8 +576,8 @@ func exactWorkingManager(snapshot HerdrSnapshot, cfg Config, hqRoot, recipient s
 	}
 	for _, agent := range snapshot.Agents {
 		if agent.Name == recipient && agent.WorkspaceID == workspaceIDs[0] {
-			if agent.Status != "working" {
-				return fmt.Errorf("recipient %s 当前 status=%s；仅 working 经理使用回合边界 nudge", recipient, agent.Status)
+			if agent.Status != "working" && agent.Status != "idle" && agent.Status != "done" {
+				return fmt.Errorf("recipient %s 当前 status=%s；nudge 只投递给 working|idle|done 的精确常驻职责位", recipient, agent.Status)
 			}
 			return nil
 		}
@@ -647,7 +651,7 @@ func (a *App) deliverClaimedNudgeAdmitted(actor Actor, view NudgeView) error {
 	if err != nil {
 		return fmt.Errorf("投递前 Herdr snapshot：%w", err)
 	}
-	if err := exactWorkingManager(initial, a.Config, a.HQRoot, view.Recipient); err != nil {
+	if err := exactNudgeRecipient(initial, a.Config, a.HQRoot, view.Recipient); err != nil {
 		return fmt.Errorf("投递前 live binding 核验失败：%w", err)
 	}
 	commandID := stableCommandID("nudge-attempt", view.NudgeID, view.ClaimID)
@@ -685,7 +689,7 @@ func (a *App) deliverClaimedNudgeAdmitted(actor Actor, view NudgeView) error {
 	}
 	final, bindingErr := a.herdrSnapshot(a.requestContext())
 	if bindingErr == nil {
-		bindingErr = exactWorkingManager(final, a.Config, a.HQRoot, view.Recipient)
+		bindingErr = exactNudgeRecipient(final, a.Config, a.HQRoot, view.Recipient)
 	}
 	if bindingErr != nil {
 		fresh, terminalErr := a.appendNudgeTerminal(actor, view, attempt.Event, "nudge_failed", truncateError(bindingErr))

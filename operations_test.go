@@ -351,11 +351,11 @@ func TestOperationsNudgeAtomicClaimDedupeTTLAndPromptRecovery(t *testing.T) {
 	}
 	control.mu.Unlock()
 	idlePrompts := countFakeCalls(control, "prompt ")
-	if err := app.cmdNudge([]string{"deliver", "--id", "NUDGE-OPS-IDLE", "--claim", "CLAIM-IDLE"}); err == nil || !strings.Contains(err.Error(), "仅 working") {
-		t.Fatalf("idle manager accepted: %v", err)
+	if err := app.cmdNudge([]string{"deliver", "--id", "NUDGE-OPS-IDLE", "--claim", "CLAIM-IDLE"}); err != nil {
+		t.Fatalf("idle manager was not woken at the turn boundary: %v", err)
 	}
-	if countFakeCalls(control, "prompt ") != idlePrompts {
-		t.Fatal("idle manager received Prompt")
+	if countFakeCalls(control, "prompt ") != idlePrompts+1 {
+		t.Fatal("idle manager did not receive exactly one Prompt")
 	}
 	control.mu.Lock()
 	for i := range control.snapshot.Agents {

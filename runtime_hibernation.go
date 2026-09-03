@@ -816,6 +816,9 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 	if activationErr := child.recoverIssuedAssignmentActivationsOnce(ctx); activationErr != nil {
 		fmt.Fprintf(a.Err, "[HQ assignment activation] %v\n", activationErr)
 	}
+	if queueErr := child.runManagerQueueWatchdogOnce(ctx); queueErr != nil {
+		fmt.Fprintf(a.Err, "[HQ manager queue watchdog] %v\n", queueErr)
+	}
 	report, reapErr := child.reapRuntimeSeats("", false, false)
 	for _, view := range report.Seats {
 		for _, blocker := range view.Blockers {

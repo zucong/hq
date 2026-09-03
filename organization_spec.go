@@ -252,7 +252,11 @@ func compileOrganizationSpec(spec organizationSpec, opts initOptions) (compiledO
 		profiles[rule.Name] = profile
 	}
 	cfg := Config{Version: registrySchemaVersion, WorkspaceLabel: opts.Workspace, OwnerPrincipal: opts.Owner,
-		RoleCards: roleCards, Agents: agents, DeliveryPolicy: &DeliveryPolicy{DefaultMode: "auto", MaxConsecutiveWakes: 3}}
+		RoleCards: roleCards, Agents: agents, DeliveryPolicy: &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 3,
+			MaxBundleItems: defaultDeliveryBundleItems, MaxBundleBytes: defaultDeliveryBundleBytes,
+			AssignmentAcceptTimeout: defaultAssignmentAcceptTimeout.String(), MaxActivationRedeliveries: defaultMaxActivationRedeliveries,
+			ManagerQueueStallTimeout: defaultManagerQueueStallTimeout.String(), ManagerQueueEscalateAfter: defaultManagerQueueEscalateAfter.String(),
+			MaxManagerQueueNudges: defaultMaxManagerQueueNudges}}
 	if err := validateConfig(cfg); err != nil {
 		return compiledOrganizationSpec{}, fmt.Errorf("organization spec 生成了无效配置：%w", err)
 	}

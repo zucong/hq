@@ -25,6 +25,8 @@ func normalizeAssignmentDue(value string) (string, error) {
 type AssignmentView struct {
 	AssignmentID         string `json:"assignment_id"`
 	AssignmentEventID    string `json:"assignment_event_id"`
+	StatusEventID        string `json:"status_event_id,omitempty"`
+	StatusUpdatedAt      string `json:"status_updated_at,omitempty"`
 	AssignmentDigest     string `json:"assignment_digest,omitempty"`
 	ContractVersion      int    `json:"contract_version"`
 	AssigneeSeatVersion  int    `json:"assignee_seat_version,omitempty"`
@@ -364,7 +366,7 @@ func assignmentFromIssue(event Event, cfg Config) (*caseAssignment, error) {
 		return nil, err
 	}
 	return &caseAssignment{
-		EventID: event.ID, AssignmentID: event.AssignmentID, AssignmentDigest: event.AssignmentDigest,
+		EventID: event.ID, StatusEventID: event.ID, AssignmentID: event.AssignmentID, AssignmentDigest: event.AssignmentDigest,
 		AssigneeSeatVersion: event.AssigneeSeatVersion, AssigneeSeatDigest: event.AssigneeSeatDigest,
 		RoleCardID: event.RoleCardID, RoleCardVersion: event.RoleCardVersion,
 		RoleCardDigest: event.RoleCardDigest, RoleCardManualPath: event.RoleCardManualPath,
@@ -395,13 +397,13 @@ func assignmentFromDeliveredIssue(event, origin Event, cfg Config) (*caseAssignm
 	if err != nil {
 		return nil, err
 	}
-	assignment.EventID, assignment.SubmissionGeneration = event.ID, event.ID
+	assignment.EventID, assignment.StatusEventID, assignment.SubmissionGeneration = event.ID, event.ID, event.ID
 	return assignment, nil
 }
 
 func (a *caseAssignment) view() AssignmentView {
 	return AssignmentView{
-		AssignmentID: a.AssignmentID, AssignmentEventID: a.EventID, AssignmentDigest: a.AssignmentDigest,
+		AssignmentID: a.AssignmentID, AssignmentEventID: a.EventID, StatusEventID: a.StatusEventID, AssignmentDigest: a.AssignmentDigest,
 		ContractVersion:     a.ContractVersion,
 		AssigneeSeatVersion: a.AssigneeSeatVersion, AssigneeSeatDigest: a.AssigneeSeatDigest,
 		RoleCardID: a.RoleCardID, RoleCardVersion: a.RoleCardVersion,
@@ -417,6 +419,9 @@ func (s *ledgerState) assignmentViews() []AssignmentView {
 	for _, eventID := range s.assignmentList {
 		if assignment := s.assignments[eventID]; assignment != nil {
 			view := assignment.view()
+			if statusEvent, ok := s.events[assignment.StatusEventID]; ok {
+				view.StatusUpdatedAt = statusEvent.At
+			}
 			for _, record := range s.deliveries {
 				if record.Terminal.ID != assignment.EventID {
 					continue

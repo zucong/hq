@@ -59,6 +59,9 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
     `fallback_recovery_sent` 以及原 assignment/case 不变；CloseTab ambiguous 必须 fail closed 且不得出现双 runtime。
 12. 模拟 issue transport sent 但员工未 accept：watchdog 只能在同一安全 idle/done seat 上复用原 payload 有界重投；
     ambiguous 必须冻结为 activation unknown，trust/safeguard 页面不得收到 Prompt，accept 后必须停止重投。
+13. 模拟下属 report 已 submitted、经理回合已结束：manager queue watchdog 必须在超时后发送带精确
+    accept/return 命令的 durable nudge，次数耗尽后沿 reports_to 升级；重复扫描不得重复 Prompt，ambiguous
+    必须冻结并要求 reconcile，且整个过程不得替经理验收或改变业务状态。
 
 公司实例不依赖源码目录或全局 `hq`，但运行环境必须单独提供 `herdr` 与 registry 所选
 Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册、成立决策和发布 checksum 的审计记录。
@@ -102,6 +105,8 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
   workstation/assignment/case 保持连续，且旧 stop、新 start 与 recovery delivery 都有 session 审计事实。
 - issue `sent` 与 assignment activation 必须分层可见；同 ID/payload 重投、unknown resolve、exhausted retry、
   ledger 防伪和 accept 后停止均通过测试。
+- 空闲经理的 durable actionable queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒、向上升级；同一
+  queue basis 跨重启去重，系统不得自动 accept/return 或伪造质量结论。
 - `on_assignment` seat 在原 assignment 仍未完成时，可由精确绑定的 report return 或合同 issuer 的 actionable
   message 从休眠中恢复；无关 case、非合同 actor、info message 不得取得启动权；prepared delivery reconcile
   必须复用原 ID 且至多 Prompt 一次。
