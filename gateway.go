@@ -46,8 +46,14 @@ func shouldUseGateway(args []string) bool {
 		}
 	}
 	switch args[0] {
-	case "whoami", "report", "issue", "approval", "message", "inbox", "accept", "return", "close", "delivery", "nudge", "reminder":
+	case "whoami", "report", "issue", "message", "inbox", "accept", "return", "close", "reminder":
 		return true
+	case "approval":
+		return len(args) > 1 && (args[1] == "request" || args[1] == "grant" || args[1] == "revoke" || args[1] == "expire")
+	case "delivery":
+		return len(args) > 1 && (args[1] == "retry" || args[1] == "resolve" || args[1] == "budget" || args[1] == "consume")
+	case "nudge":
+		return len(args) > 1 && (args[1] == "enqueue" || args[1] == "claim" || args[1] == "deliver" || args[1] == "reconcile")
 	case "case":
 		return len(args) > 1 && (args[1] == "create" || args[1] == "escalate" || args[1] == "revise")
 	case "staff":

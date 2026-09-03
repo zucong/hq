@@ -296,6 +296,17 @@ func TestCaseReviseUsesGateway(t *testing.T) {
 	}
 }
 
+func TestReadOnlyOperationalStatusBypassesMutationGateway(t *testing.T) {
+	for _, args := range [][]string{{"approval", "show"}, {"delivery", "status"}, {"nudge", "status"}} {
+		if isBusinessMutation(args) {
+			t.Errorf("read-only command %v was classified as a business mutation", args)
+		}
+		if shouldUseGateway(args) {
+			t.Errorf("read-only command %v unexpectedly requires an authenticated mutation gateway", args)
+		}
+	}
+}
+
 func TestRegistryMutationsUseGatewayAndExclusiveConfigAccess(t *testing.T) {
 	mutations := [][]string{
 		{"staff", "add"},

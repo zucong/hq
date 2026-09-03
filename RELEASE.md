@@ -135,3 +135,5 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
   必须复用原 ID 且至多 Prompt 一次。
 - 全部公开命令路径和可见参数都有本地帮助；未知命令/flag、缺失/条件必填参数和业务错误均满足 Agent
   自解释错误合同，纯参数错误不被 office/gateway/Herdr 依赖发现遮蔽。
+- `approval show`、`delivery status` 与 `nudge status` 必须在无 Herdr 身份的宿主机保持纯只读可用；同命令族的 mutation 仍经
+  gateway，未知子命令必须在本地返回精确用法而不是误报身份缺失。

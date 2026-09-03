@@ -524,7 +524,7 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 		addString("id", "稳定 nudge id（必填）")
 		addString("dedupe", "未终结期间唯一 dedupe key（必填）")
 		addString("to", "精确登记常驻经理（必填）")
-		addString("message", "单行短提醒（必填；≤200 rune）")
+		addString("message", "单行提醒（合法 UTF-8，必填；≤2 KiB）")
 		addDuration("ttl", 15*time.Minute, "TTL（30s..24h）")
 	case "nudge claim":
 		addString("id", "nudge id（必填）")

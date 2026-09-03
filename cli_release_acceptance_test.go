@@ -72,6 +72,16 @@ func TestCLIReleaseCobraHelpMatrixNoPreflight(t *testing.T) {
 	}
 }
 
+func TestNudgeHelpMatchesTwoKiBMessageContract(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := execute([]string{"nudge", "enqueue", "--help"}, &out, &errOut); err != nil {
+		t.Fatalf("nudge enqueue help failed: %v stderr=%s", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "2 KiB") || strings.Contains(out.String(), "200 rune") {
+		t.Fatalf("nudge help does not match the 2 KiB runtime contract:\n%s", out.String())
+	}
+}
+
 func TestCLIAllPublicCommandsAndFlagsAreSelfTeaching(t *testing.T) {
 	t.Setenv("HQ_OFFICE", "")
 	t.Setenv("HQ_HERDR_BIN", filepath.Join(canonicalTestTempDir(t), "must-not-exist"))

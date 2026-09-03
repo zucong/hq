@@ -155,6 +155,8 @@ temporarily unavailable 和 internal 的原始退出类别。纯参数错误必�
 
 通用纠正提示只允许重试尚未记账的命令。出现 event/delivery 已记账事实时，Agent 必须先用 `delivery status`
 或 `flow show` 查询并复用稳定 ID；不得重发业务 intent，也不得降级为裸 Herdr Prompt。
+`approval show`、`delivery status` 与 `nudge status` 是不改变状态的账本投影，直接在本地只读路径执行，不要求 mutation gateway
+或 Herdr 调用者身份；对应的 retry/resolve/reconcile 仍必须经过 gateway 和角色授权。
 
 业务写命令必须经 gateway。`--direct` 只允许实时在岗的 `can_manage_staff` 角色执行运维白名单：
 `up`、`serve`、`rebuild`、`reconcile`、`board --reindex`、`index rebuild` 和 `estop`。
@@ -482,7 +484,7 @@ ledger tail 中占用冻结 seat；尾态同时核对 `max_wip`，不允许通�
 
 业务叙述字段 `next_action`、`note`、`verification` 以及 return/close reason 与 message
 使用同一个合法 UTF-8 2 KiB byte 级硬上限，仍保持单行。标识符、标签、结构化
-引用和运维短提醒仍使用 200 rune 上限。issue 门铃还携带冻结合同、role card 和 seat
+引用仍使用 200 rune 上限；nudge `message` 与其他业务叙述字段一样使用 2 KiB 上限。issue 门铃还携带冻结合同、role card 和 seat
 元数据，因此不再用旧的 1000-rune 总长限消耗业务字段配额；它统一受 64 KiB base payload
 总线边界约束。
 

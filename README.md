@@ -451,6 +451,8 @@ HQ 的公开 CLI 以 Agent 为主要操作者。Agent 不需要先读外部文�
 
 若错误明确给出 `event_id` 或 `delivery_id`，不得把通用“重试同一命令”理解为重发业务：先运行
 `hq delivery status --id DELIVERY_ID` 或 `hq flow show --case CASE_ID`，按错误中的恢复动作复用原 ID。
+`approval show`、`delivery status` 与 `nudge status` 都是纯账本查询，不经 mutation gateway，也不要求 Herdr pane/workspace 身份；
+因此 Agent 或宿主机运维可以先核验终态，再决定是否执行受身份约束的 retry/resolve/reconcile。
 HQ 错误永远不会建议用裸 `herdr prompt` 绕过账本。
 
 典型工作流：

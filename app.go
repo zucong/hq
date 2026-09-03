@@ -275,8 +275,12 @@ func isBusinessMutation(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "report", "issue", "message", "accept", "return", "close", "delivery", "nudge", "reminder":
+	case "report", "issue", "message", "accept", "return", "close", "reminder":
 		return true
+	case "delivery":
+		return len(args) > 1 && (args[1] == "retry" || args[1] == "resolve" || args[1] == "consume")
+	case "nudge":
+		return len(args) > 1 && (args[1] == "enqueue" || args[1] == "claim" || args[1] == "deliver" || args[1] == "reconcile")
 	case "approval":
 		return len(args) > 1 && args[1] != "show"
 	case "case":
