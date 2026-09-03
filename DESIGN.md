@@ -287,7 +287,9 @@ Herdr snapshot 允许上游新增字段，但目标 workspace 的合同字段不
 `ResolveLiveBinding` 返回的是 point-in-time proof。普通 wakeup 与 nudge 在 durable attempt 前、Prompt 前分别核验一次；
 两次核验不是绑定到 attempt 的 incarnation CAS。startup 则在 Start 后确认本次创建的 workspace/tab/pane，
 写入 `session_started` 后再在 startup Prompt 前复核同一 created IDs，并在 Herdr 提供时检查 terminal/native
-session 连续性与 revision 不倒退。发现漂移即以零 Prompt 的 prepared/failed/partial-start 事实收敛。
+session 连续性与 revision 不倒退；startup Prompt 后还必须等待同一 runtime 回到可安全接收任务的输入边界。
+已确认退出（包括 CLI 自动更新后要求 restart）会写 `session_stopped` 并回收 HQ 自己创建的空 tab；无法确认时保留
+runtime 并以 partial-start fail closed。发现漂移即以零业务 Prompt 的 prepared/failed/partial-start 事实收敛。
 Herdr 当前 Prompt API 仍只接受
 agent name，不能携带 expected terminal/native session/revision 并在服务端 compare-and-send；所以最终 snapshot 后的
 同名 runtime 替换无法由 HQ 单方面原子排除。该窗口是明确的 Herdr capability boundary，不属于 HQ 的 transport
@@ -541,8 +543,9 @@ prefix。sent 或 resolved-delivered 会在一个 journal batch 中生成所选 
 Herdr Prompt 的 transport exactly-once；ambiguous 结果仍必须人工核对。
 
 issue 的 transport `sent` 与员工 activation 分层记账。`issue_sent` 创建唯一 Assignment Contract；若超时仍为
-`issued`，gateway watcher 只在同一冻结 seat/session/incarnation 精确在线、Herdr status 为 idle/done 且终端证据为
-正常输入页时，重放 origin 的原始 payload。重放使用同一 delivery/assignment，不推进 case、不预占第二份 WIP，
+`issued`，而已记账 runtime 已消失，gateway watcher 会先收敛旧 session，再凭该冻结 assignment cold-resume 同一
+seat。只有新旧任一精确 session/incarnation 在线、Herdr status 为 idle/done 且终端证据为正常输入页时，才重放
+origin 的原始 payload。重放使用同一 delivery/assignment，不推进 case、不预占第二份 WIP，
 并以 `assignment_activation_attempted → sent|failed_pre_send|unknown` 记录外部副作用边界。attempted 崩溃残留
 保守转 unknown；unknown 禁止自动重投并复用 `delivery resolve`，有界额度耗尽后写 exhausted，显式
 `delivery retry` 可在经理再次核验后恢复。员工 durable `accept` 是唯一 activation acknowledgement，之后 watcher

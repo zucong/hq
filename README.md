@@ -537,8 +537,9 @@ assignment/case、正式投递、行动型消息确认或 reminder/nudge 时自�
 `AVAILABLE_WIP` 判断能否派工。只在组织治理或审计时才同时传入 `--all`。
 
 `issue_sent` 只证明 Herdr 已接受门铃注入，不证明员工看见任务或执行了 `accept`。gateway 的 assignment
-activation watchdog 会在 `assignment_accept_timeout` 后核对原 assignment 仍为 `issued`、冻结 seat 精确在线、
-runtime 为安全 `idle|done`，并且 Codex 终端确实处于正常输入页；满足条件时，它复用完全相同的 delivery ID、
+activation watchdog 会在 `assignment_accept_timeout` 后核对原 assignment 仍为 `issued`。若冻结 seat 的已记账
+runtime 已消失，watchdog 会先收敛旧 session，再按同一 assignment 权限 cold-resume 同一 seat；随后只有在精确
+session/incarnation 为安全 `idle|done` 且 Codex 终端确实处于正常输入页时，才复用完全相同的 delivery ID、
 assignment event 和原始 payload 有界重投，最多 `max_activation_redeliveries` 次。重复出现的同一
 `[HQ notification]` 是激活重投，不是新任务；员工查询原 assignment 后只 accept 原 event。
 任何 Herdr 歧义都会写成 `activation_unknown` 并停止自动重投；额度耗尽写成 `activation_exhausted`。
@@ -889,7 +890,9 @@ HQ supervisor/registry/ledger/approval key 由员工进程不可写的独立 OS 
 live binding 是 Herdr snapshot 给出的时点证明。HQ 会在业务 wakeup、nudge 和 startup Prompt 的关键边界至少两次复核
 seat、kind、cwd、tab/pane 与 readiness，已观察到的漂移不会进入 Prompt。wakeup/nudge 的两次验证是时点证明，
 不是绑定到 attempt 的 incarnation CAS；startup 则在 Start 后冻结本次创建的 workspace/tab/pane，写入 session 事实后
-再复核同一 created IDs，并在 Herdr 提供时检查 terminal/native session 连续性与 revision 不倒退。但当前 Herdr
+再复核同一 created IDs，并在 startup Prompt 后等待同一 runtime 回到安全输入边界。若 CLI 自动更新等短暂进程退出，
+HQ 会落账 stopped、回收自己创建的空 tab，并拒绝把该启动当成可投递 seat；若边界结果不确定则保留 runtime 并返回
+partial-start 供恢复。HQ 在 Herdr 提供时同时检查 terminal/native session 连续性与 revision 不倒退。但当前 Herdr
 `agent prompt` 只接受 agent name，不接受 `expected_terminal/session/revision` 形式的 compare-and-send 条件。因此最后一次
 snapshot 与按 name Prompt 之间仍存在上游能力边界内的极短替换窗口。彻底关闭该窗口需要 Herdr 提供原子 expected-binding
 参数；HQ 不把两阶段时点核验描述成 transport 级原子绑定。

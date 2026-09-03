@@ -33,6 +33,12 @@ func assignmentActivationFixture(t *testing.T, terminal string) (testEnv, Config
 	cfg, err := mutateConfig(e.config, func(cfg *Config) error {
 		cfg.DeliveryPolicy = &DeliveryPolicy{DefaultMode: deliveryModeAuto, MaxConsecutiveWakes: 10,
 			AssignmentAcceptTimeout: "15s", MaxActivationRedeliveries: 2}
+		for index := range cfg.Agents {
+			if cfg.Agents[index].Name == "eng-developer" {
+				cfg.Agents[index].ActivationPolicy = activationOnAssignment
+				finalizeTestSeatMutation(&cfg.Agents[index])
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -145,6 +151,45 @@ func TestAssignmentActivationWatchdogRedeliversSamePayloadThenStopsAfterAccept(t
 	}
 	if promptCount != 1 {
 		t.Fatalf("accepted assignment was redelivered: %#v", control.calls)
+	}
+}
+
+func TestAssignmentActivationWatchdogColdResumesMissingIssuedSeat(t *testing.T) {
+	_, _, app, control, deliveryID, _ := assignmentActivationFixture(t, "› Ask Codex to do anything\n")
+	control.mu.Lock()
+	control.snapshot.Agents = nil
+	control.nextID = 2
+	control.mu.Unlock()
+
+	if err := app.recoverIssuedAssignmentActivationsOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := app.ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := ledger.deliveries[deliveryID]
+	if record.ActivationStatus != activationSent || record.ActivationAttemptCount != 1 {
+		t.Fatalf("offline issued assignment did not converge after cold-resume: activation=%s attempts=%d", record.ActivationStatus, record.ActivationAttemptCount)
+	}
+	control.mu.Lock()
+	calls := append([]string(nil), control.calls...)
+	live := append([]HerdrAgent(nil), control.snapshot.Agents...)
+	control.mu.Unlock()
+	joined := strings.Join(calls, "\n")
+	worker, _ := app.Config.exactRule("eng-developer")
+	if !strings.Contains(joined, "tab create "+rosterTabLabel(worker)) || !strings.Contains(joined, "agent start eng-developer ") || strings.Count(joined, "prompt eng-developer ") != 2 {
+		t.Fatalf("offline activation did not cold-resume then replay the exact assignment: %v", calls)
+	}
+	if len(live) != 1 || live[0].Name != "eng-developer" {
+		t.Fatalf("cold-resume did not establish one exact live seat: %+v", live)
+	}
+	sessions, err := app.Sessions.List(SessionFilter{Agent: "eng-developer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(activeSessionStarts(sessions)) != 1 || activeSessionStarts(sessions)[0].TabID != "w-test:t2" {
+		t.Fatalf("session ledger did not replace the disappeared incarnation: %+v", sessions)
 	}
 }
 

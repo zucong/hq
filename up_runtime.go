@@ -364,6 +364,115 @@ type runtimeStartOptions struct {
 	PromptSuffix   string
 }
 
+const runtimeStartupPromptBoundaryTimeout = 30 * time.Second
+
+func exactCreatedStartupAgent(snapshot HerdrSnapshot, workspaceID string, rule AgentRule, created HerdrTabCreated) (HerdrAgent, bool, error) {
+	var candidates []HerdrAgent
+	for _, agent := range snapshot.Agents {
+		if agent.Name == rule.Name {
+			candidates = append(candidates, agent)
+		}
+	}
+	if len(candidates) == 0 {
+		return HerdrAgent{}, false, nil
+	}
+	if len(candidates) != 1 {
+		return HerdrAgent{}, false, fmt.Errorf("startup Prompt 后 agent=%s 的 live 候选不唯一：%d", rule.Name, len(candidates))
+	}
+	live := candidates[0]
+	if live.WorkspaceID != workspaceID || live.TabID != created.Tab.ID || live.PaneID != created.Pane.ID {
+		return HerdrAgent{}, false, fmt.Errorf("startup Prompt 后 agent=%s 仍在线，但已绑定到其他 runtime=%s/%s/%s；保留现场供核验",
+			rule.Name, live.WorkspaceID, live.TabID, live.PaneID)
+	}
+	return live, true, nil
+}
+
+func (a *App) waitForStartupPromptBoundary(ctx context.Context, workspaceID string, rule AgentRule, created HerdrTabCreated, initial LiveBinding) (LiveBinding, bool, error) {
+	deadline := time.Now().Add(runtimeStartupPromptBoundaryTimeout)
+	for {
+		snapshot, err := a.herdrSnapshot(ctx)
+		if err != nil {
+			return LiveBinding{}, false, err
+		}
+		live, present, presenceErr := exactCreatedStartupAgent(snapshot, workspaceID, rule, created)
+		if presenceErr != nil {
+			return LiveBinding{}, false, presenceErr
+		}
+		if !present {
+			return LiveBinding{}, true, fmt.Errorf("herdr 快照中已找不到本次启动的 agent=%s", rule.Name)
+		}
+		binding, err := resolveStartedAgentBinding(snapshot, workspaceID, rule, a.HQRoot, created)
+		if err != nil {
+			// Herdr may briefly mark a still-present process non-interactive while
+			// its terminal is changing state. Keep observing that exact process;
+			// structural binding failures are preserved for diagnosis and are
+			// never treated as proof that the process exited.
+			if acceptableLiveStatus(live.Status) && live.InteractiveReady {
+				return LiveBinding{}, false, err
+			}
+			if !time.Now().Before(deadline) {
+				return LiveBinding{}, false, fmt.Errorf("startup Prompt 后 %s 内精确 runtime 未恢复可交互状态（status=%s interactive_ready=%t）：%w",
+					runtimeStartupPromptBoundaryTimeout, live.Status, live.InteractiveReady, err)
+			}
+			if err := waitRuntimeStartupBoundaryPoll(ctx); err != nil {
+				return LiveBinding{}, false, err
+			}
+			continue
+		}
+		if mismatch := liveBindingIncarnationMismatch(initial, binding); mismatch != "" {
+			return LiveBinding{}, false, fmt.Errorf("runtime incarnation 漂移：%s；保留现场供核验", mismatch)
+		}
+		if !assignmentActivationReadyStatus(binding.Status) {
+			if !time.Now().Before(deadline) {
+				return LiveBinding{}, false, fmt.Errorf("startup Prompt 后 %s 内 runtime 未结束到岗回合（status=%s）",
+					runtimeStartupPromptBoundaryTimeout, binding.Status)
+			}
+			if err := waitRuntimeStartupBoundaryPoll(ctx); err != nil {
+				return LiveBinding{}, false, err
+			}
+			continue
+		}
+		reader, canRead := a.Herdr.(HerdrAgentReader)
+		if rule.Kind != "codex" || !canRead {
+			return binding, false, nil
+		}
+		raw, readErr := reader.ReadAgent(ctx, rule.Name)
+		if readErr == nil && terminalReadyForHQPrompt(binding.Kind, raw) {
+			return binding, false, nil
+		}
+		if readErr == nil && terminalShowsContentSafeguard(raw) {
+			return LiveBinding{}, false, fmt.Errorf("startup Prompt 后进入 content safeguard，保留当前 runtime 供 fallback/人工核验")
+		}
+		if !time.Now().Before(deadline) {
+			return LiveBinding{}, false, fmt.Errorf("startup Prompt 后 %s 内未回到可安全接收任务的输入页", runtimeStartupPromptBoundaryTimeout)
+		}
+		if err := waitRuntimeStartupBoundaryPoll(ctx); err != nil {
+			return LiveBinding{}, false, err
+		}
+	}
+}
+
+func waitRuntimeStartupBoundaryPoll(ctx context.Context) error {
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (a *App) rejectDefinitivelyExitedStartup(ctx context.Context, event SessionEvent, created HerdrTabCreated, actor, phase string, cause error) error {
+	reason := phase + " runtime 已消失；拒绝把短暂启动记作可投递 seat"
+	_, stoppedErr := a.appendDerivedSession(event, sessionStopped, actor, reason)
+	cleanupErr := a.closeOwnedTab(ctx, created.Tab.ID)
+	if stoppedErr != nil {
+		cause = fmt.Errorf("%v；session stopped 记账失败：%w", cause, stoppedErr)
+	}
+	return combineLifecycleError(fmt.Errorf("%s精确 runtime 已消失：%w", phase, cause), cleanupErr, created.Tab.ID)
+}
+
 func (a *App) startHQAgentAdmittedWithOptions(ctx context.Context, workspaceID string, rule AgentRule, options runtimeStartOptions) error {
 	runtimeRule := rule
 	if options.Kind != "" {
@@ -485,6 +594,13 @@ func (a *App) startHQAgentAdmittedWithOptions(ctx context.Context, workspaceID s
 	}
 	finalBinding, finalBindingErr := resolveStartedAgentBinding(finalSnapshot, workspaceID, runtimeRule, a.HQRoot, created)
 	if finalBindingErr != nil {
+		_, present, presenceErr := exactCreatedStartupAgent(finalSnapshot, workspaceID, runtimeRule, created)
+		if presenceErr == nil && !present {
+			return a.rejectDefinitivelyExitedStartup(ctx, event, created, actor, "startup Prompt 前", finalBindingErr)
+		}
+		if presenceErr != nil {
+			finalBindingErr = fmt.Errorf("%v；live presence 核验：%w", finalBindingErr, presenceErr)
+		}
 		return &PartialStartError{Agent: rule.Name, WorkspaceID: workspaceID, TabID: created.Tab.ID, PaneID: created.Pane.ID,
 			SessionID: event.SessionID, Cause: fmt.Errorf("startup Prompt 前 live binding 核验失败：%w", finalBindingErr)}
 	}
@@ -499,6 +615,12 @@ func (a *App) startHQAgentAdmittedWithOptions(ctx context.Context, workspaceID s
 	promptResult := a.Herdr.Prompt(ctx, rule.Name, prompt)
 	if promptResult.Err != nil {
 		return &PartialStartError{Agent: rule.Name, WorkspaceID: workspaceID, TabID: created.Tab.ID, PaneID: created.Pane.ID, SessionID: event.SessionID, Cause: promptResult.Err}
+	}
+	if _, definitelyGone, boundaryErr := a.waitForStartupPromptBoundary(ctx, workspaceID, runtimeRule, created, finalBinding); boundaryErr != nil {
+		if !definitelyGone {
+			return &PartialStartError{Agent: rule.Name, WorkspaceID: workspaceID, TabID: created.Tab.ID, PaneID: created.Pane.ID, SessionID: event.SessionID, Cause: boundaryErr}
+		}
+		return a.rejectDefinitivelyExitedStartup(ctx, event, created, actor, "startup Prompt 后", boundaryErr)
 	}
 	_, err = fmt.Fprintf(a.Out, "已启动 %s（department=%s kind=%s pane=%s session=%s）\n", rule.Name, rule.Department, runtimeRule.Kind, created.Pane.ID, event.SessionID)
 	return err

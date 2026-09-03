@@ -68,6 +68,51 @@ type timeoutNthPromptControl struct {
 	attempts  int
 }
 
+type exitAfterConfirmedPromptControl struct {
+	*fakeHerdrControl
+	once sync.Once
+}
+
+type exitBeforeStartupPromptControl struct {
+	*fakeHerdrControl
+	mu       sync.Mutex
+	seenLive bool
+}
+
+func (c *exitBeforeStartupPromptControl) Snapshot(ctx context.Context, scope HerdrSnapshotScope) (HerdrSnapshot, error) {
+	c.mu.Lock()
+	c.fakeHerdrControl.mu.Lock()
+	if len(c.fakeHerdrControl.snapshot.Agents) != 0 {
+		if c.seenLive {
+			c.fakeHerdrControl.snapshot.Agents = nil
+		} else {
+			c.seenLive = true
+		}
+	}
+	c.fakeHerdrControl.mu.Unlock()
+	c.mu.Unlock()
+	return c.fakeHerdrControl.Snapshot(ctx, scope)
+}
+
+type staticTerminalReaderControl struct {
+	*fakeHerdrControl
+	terminal []byte
+}
+
+func (c *staticTerminalReaderControl) ReadAgent(context.Context, string) ([]byte, error) {
+	return append([]byte(nil), c.terminal...), nil
+}
+
+func (c *exitAfterConfirmedPromptControl) Prompt(ctx context.Context, target, message string) HerdrMutationResult {
+	result := c.fakeHerdrControl.Prompt(ctx, target, message)
+	c.once.Do(func() {
+		c.fakeHerdrControl.mu.Lock()
+		defer c.fakeHerdrControl.mu.Unlock()
+		c.fakeHerdrControl.snapshot.Agents = nil
+	})
+	return result
+}
+
 func (c *timeoutNthPromptControl) Prompt(parent context.Context, target, message string) HerdrMutationResult {
 	c.mu.Lock()
 	c.attempts++
@@ -302,7 +347,11 @@ func (f *fakeHerdrControl) Prompt(ctx context.Context, target, message string) H
 	if f.promptWakes {
 		for index := range f.snapshot.Agents {
 			if f.snapshot.Agents[index].Name == target && f.snapshot.Agents[index].InteractiveReady {
-				f.snapshot.Agents[index].Status = "working"
+				if strings.Contains(message, "本信封只建立到岗运行态") {
+					f.snapshot.Agents[index].Status = "idle"
+				} else {
+					f.snapshot.Agents[index].Status = "working"
+				}
 			}
 		}
 	}
@@ -908,6 +957,104 @@ func TestHerdrRuntimeUpInjectsIdentityRecordsSessionAndHandlesFailures(t *testin
 		err := other.runUp([]string{"--no-gateway", rule.Name})
 		if err == nil || !strings.Contains(err.Error(), "orphan_id=") || len(freshControl.snapshot.Tabs) != 1 {
 			t.Fatalf("err=%v snapshot=%+v", err, freshControl.snapshot)
+		}
+	})
+
+	t.Run("confirmed startup process exits before safe prompt boundary", func(t *testing.T) {
+		freshControl := newFakeHerdrControl(e.root, "hq-test")
+		control := &exitAfterConfirmedPromptControl{fakeHerdrControl: freshControl}
+		other := *app
+		other.Herdr = control
+		other.Sessions = &FileSessionStore{Root: filepath.Join(e.root, "startup-exit-session")}
+		err := other.runUp([]string{"--no-gateway", rule.Name})
+		if err == nil || !strings.Contains(err.Error(), "startup Prompt 后精确 runtime 已消失") {
+			t.Fatalf("short-lived startup was accepted: %v", err)
+		}
+		freshControl.mu.Lock()
+		tabs := append([]HerdrTab(nil), freshControl.snapshot.Tabs...)
+		freshControl.mu.Unlock()
+		if len(tabs) != 0 {
+			t.Fatalf("definitively exited startup left an owned orphan tab: %+v", tabs)
+		}
+		sessions, listErr := other.Sessions.List(SessionFilter{Agent: rule.Name})
+		if listErr != nil || len(sessions) != 2 || sessions[0].Type != sessionStarted || sessions[1].Type != sessionStopped || len(activeSessionStarts(sessions)) != 0 {
+			t.Fatalf("short-lived startup session did not converge: sessions=%+v err=%v", sessions, listErr)
+		}
+	})
+
+	t.Run("confirmed startup process exits before startup prompt", func(t *testing.T) {
+		freshControl := newFakeHerdrControl(e.root, "hq-test")
+		control := &exitBeforeStartupPromptControl{fakeHerdrControl: freshControl}
+		other := *app
+		other.Herdr = control
+		other.Sessions = &FileSessionStore{Root: filepath.Join(e.root, "startup-pre-prompt-exit-session")}
+		err := other.runUp([]string{"--no-gateway", rule.Name})
+		if err == nil || !strings.Contains(err.Error(), "startup Prompt 前精确 runtime 已消失") {
+			t.Fatalf("pre-prompt short-lived startup was accepted: %v", err)
+		}
+		freshControl.mu.Lock()
+		tabs := append([]HerdrTab(nil), freshControl.snapshot.Tabs...)
+		calls := append([]string(nil), freshControl.calls...)
+		freshControl.mu.Unlock()
+		if len(tabs) != 0 {
+			t.Fatalf("pre-prompt exit left an owned orphan tab: %+v", tabs)
+		}
+		for _, call := range calls {
+			if strings.HasPrefix(call, "prompt ") {
+				t.Fatalf("pre-prompt exit still received a Prompt: %v", calls)
+			}
+		}
+		sessions, listErr := other.Sessions.List(SessionFilter{Agent: rule.Name})
+		if listErr != nil || len(sessions) != 2 || sessions[0].Type != sessionStarted || sessions[1].Type != sessionStopped || len(activeSessionStarts(sessions)) != 0 {
+			t.Fatalf("pre-prompt exit session did not converge: sessions=%+v err=%v", sessions, listErr)
+		}
+	})
+
+	t.Run("startup boundary waits for transient non-interactive state", func(t *testing.T) {
+		ready := healthySnapshot(e.root, rule, "idle")
+		notInteractive := cloneHerdrSnapshot(ready)
+		notInteractive.Agents[0].InteractiveReady = false
+		working := cloneHerdrSnapshot(ready)
+		working.Agents[0].Status = "working"
+		control := newFakeHerdrControl(e.root, "hq-test")
+		control.snapshot = ready
+		control.snapshots = []HerdrSnapshot{notInteractive, working, ready}
+		reader := &staticTerminalReaderControl{fakeHerdrControl: control, terminal: []byte("› Ask Codex to do anything\n")}
+		other := *app
+		other.Herdr = reader
+		created := HerdrTabCreated{Tab: ready.Tabs[0], Pane: ready.Panes[0]}
+		initial, bindingErr := resolveStartedAgentBinding(ready, "w-test", rule, e.root, created)
+		if bindingErr != nil {
+			t.Fatal(bindingErr)
+		}
+		binding, definitelyGone, boundaryErr := other.waitForStartupPromptBoundary(context.Background(), "w-test", rule, created, initial)
+		if boundaryErr != nil || definitelyGone || binding.Seat != rule.Name {
+			t.Fatalf("transient readiness was treated as an exited or unsafe runtime: binding=%+v gone=%t err=%v", binding, definitelyGone, boundaryErr)
+		}
+		control.mu.Lock()
+		calls := append([]string(nil), control.calls...)
+		control.mu.Unlock()
+		if len(calls) != 3 || calls[0] != "snapshot" || calls[1] != "snapshot" || calls[2] != "snapshot" {
+			t.Fatalf("startup boundary did not re-snapshot the exact runtime: %v", calls)
+		}
+	})
+
+	t.Run("startup boundary preserves moved live runtime", func(t *testing.T) {
+		ready := healthySnapshot(e.root, rule, "idle")
+		created := HerdrTabCreated{Tab: ready.Tabs[0], Pane: ready.Panes[0]}
+		initial, bindingErr := resolveStartedAgentBinding(ready, "w-test", rule, e.root, created)
+		if bindingErr != nil {
+			t.Fatal(bindingErr)
+		}
+		ready.Agents[0].TabID = "w-test:t-other"
+		ready.Agents[0].PaneID = "w-test:p-other"
+		control := newFakeHerdrControl(e.root, "hq-test")
+		control.snapshot = ready
+		other := *app
+		other.Herdr = control
+		_, definitelyGone, boundaryErr := other.waitForStartupPromptBoundary(context.Background(), "w-test", rule, created, initial)
+		if boundaryErr == nil || definitelyGone || !strings.Contains(boundaryErr.Error(), "保留现场") {
+			t.Fatalf("moved live runtime was not preserved for diagnosis: gone=%t err=%v", definitelyGone, boundaryErr)
 		}
 	})
 }

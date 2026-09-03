@@ -17,7 +17,7 @@ func assignmentActivationReadyStatus(status string) bool {
 	return status == "idle" || status == "done"
 }
 
-func terminalReadyForAssignmentActivation(kind string, raw []byte) bool {
+func terminalReadyForHQPrompt(kind string, raw []byte) bool {
 	if kind != "codex" {
 		return true
 	}
@@ -162,6 +162,22 @@ func (a *App) activateIssuedAssignmentOnce(ctx context.Context, deliveryID strin
 		if err := a.verifyCurrentFrozenSeat(frozenSeatFromAssignment(assignment)); err != nil {
 			return err
 		}
+		if err := a.ensureRuntimeSeatOriginSafeLocked(assignment.Recipient); err != nil {
+			return err
+		}
+		runtimeState, err := a.inspectDeliveryTarget(assignment.Recipient)
+		if err != nil {
+			return err
+		}
+		if runtimeState == deliveryRuntimeOffline {
+			rule, ok := a.Config.exactRule(assignment.Recipient)
+			if !ok || (rule.ActivationPolicy != activationOnAssignment && rule.ActivationPolicy != activationAlways) {
+				return nil
+			}
+			if err := a.coldResumeDeliveryTargetAdmitted(assignment.Recipient); err != nil {
+				return fmt.Errorf("issued assignment 的离线 seat cold-resume 失败：%w", err)
+			}
+		}
 		snapshot, err := a.herdrSnapshot(ctx)
 		if err != nil {
 			return err
@@ -179,7 +195,7 @@ func (a *App) activateIssuedAssignmentOnce(ctx context.Context, deliveryID strin
 		}
 		if reader, ok := a.Herdr.(HerdrAgentReader); ok {
 			raw, readErr := reader.ReadAgent(ctx, assignment.Recipient)
-			if readErr != nil || !terminalReadyForAssignmentActivation(binding.Kind, raw) {
+			if readErr != nil || !terminalReadyForHQPrompt(binding.Kind, raw) {
 				return nil
 			}
 		} else if binding.Kind == "codex" {

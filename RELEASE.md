@@ -58,7 +58,9 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
 11. 如配置 `runtime_fallback`，用合成 terminal evidence 验证 primary 关闭、fallback 启动、
     `fallback_recovery_sent` 以及原 assignment/case 不变；CloseTab ambiguous 必须 fail closed 且不得出现双 runtime。
 12. 模拟 issue transport sent 但员工未 accept：watchdog 只能在同一安全 idle/done seat 上复用原 payload 有界重投；
-    ambiguous 必须冻结为 activation unknown，trust/safeguard 页面不得收到 Prompt，accept 后必须停止重投。
+    已记账 runtime 消失时必须先收敛旧 session、cold-resume 同一冻结 seat 再重投；模拟 CLI 自动更新后退出时，
+    startup 不得误判成功或遗留 HQ-owned orphan tab。ambiguous 必须冻结为 activation unknown，trust/safeguard
+    页面不得收到 Prompt，accept 后必须停止重投。
 13. 模拟下属 report 已 submitted、经理回合已结束：manager queue watchdog 必须在超时后发送带精确
     accept/return 命令的 durable nudge，次数耗尽后沿 reports_to 升级；重复扫描不得重复 Prompt，ambiguous
     必须冻结并要求 reconcile，且整个过程不得替经理验收或改变业务状态；混合队列必须保持
