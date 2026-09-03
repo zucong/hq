@@ -83,7 +83,11 @@ func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, e
 		})
 	}
 	for caseID, state := range s.snapshot.Cases {
-		if state == nil || state.Status == string(statusClosed) || activeCases[caseID] {
+		// Only a newly created, unassigned case is actionable merely because a
+		// manager owns it. Accepted, blocked, escalated, and other non-terminal
+		// historical states may require a different actor or a fresh lifecycle;
+		// treating every non-closed case as manager work creates false wakeups.
+		if state == nil || state.Status != string(statusOpen) || activeCases[caseID] {
 			continue
 		}
 		manager, ok := cfg.exactRule(state.Owner)

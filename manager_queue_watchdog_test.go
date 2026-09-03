@@ -180,6 +180,75 @@ func TestManagerQueueWatchdogRecoversAnExpiredClaimWithoutDuplicateOrigin(t *tes
 	}
 }
 
+func TestManagerQueueBacklogOnlyTreatsOpenUnassignedOwnedCaseAsActionable(t *testing.T) {
+	e, cfg, _, report := managerQueueSubmittedFixture(t, "QUEUE-ACTIONABLE-ROOT")
+	e.setActor(t, "zantianyou", "queue:manager", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "accept", "--event", report.ID, "--next", "Accepted result is historical, not a fresh task")
+
+	ledger, err := e.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err := ledger.managerQueueBacklogs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backlogs) != 0 {
+		t.Fatalf("accepted manager-owned case was falsely actionable: %+v", backlogs)
+	}
+
+	blockedSource := writeTestFile(t, filepath.Join(e.root, "engineering", "queue-blocked-source.md"), "# blocked work\n")
+	runTestCommand(t, e, "case", "create", "--id", "QUEUE-ACTIONABLE-BLOCKED", "--parent", "QUEUE-ACTIONABLE-ROOT",
+		"--title", "Blocked historical work", "--source", blockedSource)
+	runTestCommand(t, e, "issue", "--case", "QUEUE-ACTIONABLE-BLOCKED", "--to", "eng-developer", "--next", "Attempt and report the blocker")
+	events, err := NewStore(e.data).ReadAll(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockedIssue := latestCaseEvent(events, "QUEUE-ACTIONABLE-BLOCKED", "issue_sent")
+	e.setActor(t, "eng-developer", "queue:worker", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "accept", "--event", blockedIssue.ID, "--next", "Attempt assigned work")
+	runTestCommand(t, e, "report", "--case", "QUEUE-ACTIONABLE-BLOCKED", "--result", "blocked", "--source", blockedSource,
+		"--note", "External prerequisite is unavailable", "--next", "Manager records the blocker")
+	events, err = NewStore(e.data).ReadAll(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockedReport := latestCaseEvent(events, "QUEUE-ACTIONABLE-BLOCKED", "report_sent")
+	e.setActor(t, "zantianyou", "queue:manager", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "accept", "--event", blockedReport.ID, "--next", "Wait for the external prerequisite")
+	ledger, err = e.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err = ledger.managerQueueBacklogs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backlogs) != 0 {
+		t.Fatalf("blocked manager-owned case was falsely actionable: %+v", backlogs)
+	}
+
+	source := writeTestFile(t, filepath.Join(e.root, "engineering", "queue-actionable-child.md"), "# unassigned manager work\n")
+	runTestCommand(t, e, "case", "create", "--id", "QUEUE-ACTIONABLE-CHILD", "--parent", "QUEUE-ACTIONABLE-ROOT",
+		"--title", "Open work waiting for delegation", "--source", source)
+	ledger, err = e.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err = ledger.managerQueueBacklogs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backlogs) != 1 || backlogs[0].Manager != "zantianyou" || len(backlogs[0].Items) != 1 {
+		t.Fatalf("open unassigned manager-owned case was not actionable: %+v", backlogs)
+	}
+	item := backlogs[0].Items[0]
+	if item.Kind != "owned_case" || item.CaseID != "QUEUE-ACTIONABLE-CHILD" || item.Status != string(statusOpen) {
+		t.Fatalf("unexpected actionable owned case: %+v", item)
+	}
+}
+
 func setFakeAgentStatus(control *fakeHerdrControl, name, status string) {
 	control.mu.Lock()
 	defer control.mu.Unlock()

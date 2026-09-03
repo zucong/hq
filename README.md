@@ -542,7 +542,8 @@ assignment event 和原始 payload 有界重投，最多 `max_activation_redeliv
 
 经理和总部联络职责位不能只靠角色手册自觉清空队列。gateway 的 manager queue watchdog 会严格重放账本，
 识别三类 durable 待办：等待 accept/return 的下属 submission、经理本人尚未接单或尚未 report 的 assignment，
-以及经理持有但没有 active assignment 的未关闭 case。只有目标精确在岗且 Herdr 状态为 `idle|done`，最老待办
+以及经理新建但尚未形成 active assignment 的 `open` case。`accepted`、`blocked`、`escalated` 等历史或待外部动作
+状态不会仅因 owner 仍是经理而触发误催。只有目标精确在岗且 Herdr 状态为 `idle|done`，最老待办
 又超过 `manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。相同最老 status event
 作为稳定 basis；提醒至少间隔一个 stall timeout，最多 `max_manager_queue_nudges` 次。最后一次提醒后仍超过
 `manager_queue_escalate_after`，HQ 会把问题升级给 registry 中的 `reports_to`。Prompt 结果不确定时禁止自动重投，
