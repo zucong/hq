@@ -209,10 +209,10 @@ func ledgerNudgeByDedupe(ledger *ledgerState, dedupe string) *nudgeLedgerRecord 
 	return nil
 }
 
-func liveQueueManagerStatus(snapshot HerdrSnapshot, cfg Config, hqRoot, manager string) (string, error) {
-	rule, ok := cfg.exactRule(manager)
+func liveQueueTargetStatus(snapshot HerdrSnapshot, cfg Config, hqRoot, target string) (string, error) {
+	rule, ok := cfg.exactRule(target)
 	if !ok || !isNudgeRecipient(cfg, rule) {
-		return "", fmt.Errorf("queue target %s 不再是精确常驻管理职责位", manager)
+		return "", fmt.Errorf("queue target %s 不再是精确登记且可接收任务的在职 HQ seat", target)
 	}
 	workspaceID := ""
 	for _, workspace := range snapshot.Workspaces {
@@ -226,17 +226,17 @@ func liveQueueManagerStatus(snapshot HerdrSnapshot, cfg Config, hqRoot, manager 
 	if workspaceID == "" {
 		return "", fmt.Errorf("workspace label %s 不存在", cfg.WorkspaceLabel)
 	}
-	binding, err := ResolveLiveBinding(snapshot, cfg, hqRoot, LiveBindingRequest{Seat: manager, RequireInteractiveReady: true})
+	binding, err := ResolveLiveBinding(snapshot, cfg, hqRoot, LiveBindingRequest{Seat: target, RequireInteractiveReady: true})
 	if err != nil {
 		return "", err
 	}
 	if binding.WorkspaceID != workspaceID {
-		return "", fmt.Errorf("queue target %s 位于错误 workspace", manager)
+		return "", fmt.Errorf("queue target %s 位于错误 workspace", target)
 	}
 	return binding.Status, nil
 }
 
-func (a *App) driveManagerQueueNudge(ctx context.Context, id, dedupe, target, message string, create bool) error {
+func (a *App) driveQueueNudge(ctx context.Context, id, dedupe, target, message string, create, allowAssignmentWorker bool) error {
 	child := *a
 	child.RequestContext = nonNilContext(ctx)
 	child.CallerPane = child.MaintenancePane
@@ -245,7 +245,7 @@ func (a *App) driveManagerQueueNudge(ctx context.Context, id, dedupe, target, me
 		child.Store = store.withRequestContext(ctx)
 	}
 	if create {
-		if err := child.cmdNudgeEnqueue([]string{"--id", id, "--dedupe", dedupe, "--to", target, "--message", message, "--ttl", managerQueueNudgeTTL.String()}); err != nil {
+		if err := child.cmdNudgeEnqueueWithScope([]string{"--id", id, "--dedupe", dedupe, "--to", target, "--message", message, "--ttl", managerQueueNudgeTTL.String()}, allowAssignmentWorker); err != nil {
 			return err
 		}
 	}
@@ -283,6 +283,10 @@ func (a *App) driveManagerQueueNudge(ctx context.Context, id, dedupe, target, me
 	return nil
 }
 
+func (a *App) driveManagerQueueNudge(ctx context.Context, id, dedupe, target, message string, create bool) error {
+	return a.driveQueueNudge(ctx, id, dedupe, target, message, create, false)
+}
+
 func (a *App) runManagerQueueWatchdogOnce(ctx context.Context) error {
 	if a.Herdr == nil || a.Store == nil || a.MaintenancePane == "" {
 		return nil
@@ -310,7 +314,7 @@ func (a *App) runManagerQueueWatchdogOnce(ctx context.Context) error {
 	stallAfter, escalateAfter, maxNudges := a.Config.managerQueueWatchdogPolicy()
 	failures := make([]string, 0)
 	for _, backlog := range backlogs {
-		status, statusErr := liveQueueManagerStatus(snapshot, a.Config, a.HQRoot, backlog.Manager)
+		status, statusErr := liveQueueTargetStatus(snapshot, a.Config, a.HQRoot, backlog.Manager)
 		if statusErr != nil || (status != "idle" && status != "done") {
 			continue
 		}

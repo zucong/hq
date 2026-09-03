@@ -551,6 +551,13 @@ origin 的原始 payload。重放使用同一 delivery/assignment，不推进 ca
 `delivery retry` 可在经理再次核验后恢复。员工 durable `accept` 是唯一 activation acknowledgement，之后 watcher
 不再重放。Codex 的 hook-trust/content-safeguard 页面不满足安全输入证据，因此不会接收重投。
 
+activation acknowledgement 之后由独立 assignment-progress watchdog 兜底：非经理 seat 的 assignment 若仍为
+`accepted|rework`，而精确 runtime 已在 `idle|done` 超过同一 queue timeout，则 gateway 以 durable nudge 要求原员工
+查询冻结 assignment/history 并在原 case report；有界催办后沿 `reports_to` 升级。若 runtime 已消失且 policy 为
+`on_assignment|always`，先收敛旧 session，再在同一 seat/workstation cold-resume，并追加
+`[HQ runtime recovery] trigger=assignment_progress`，不复制隐藏会话。所有这些动作都不生成第二个 assignment、
+不替员工 report、不替经理验收；人工 nudge 仍只面向管理/总部职责位，不能成为绕过 issue 的派工通道。
+
 `delivery consume` 与 accept-time context render 会在 ledger flock 内选择、输出并提交 claim，从而拒绝并发
 bundle/consume 抢占；但 stdout/调用方输出不是 durable transport。若进程在 render 成功后、写入 journal intent
 前崩溃，同一 envelope 可能在恢复后再次暴露。需要一次外部可见性的场景必须在后续增加两阶段 output

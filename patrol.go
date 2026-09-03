@@ -105,6 +105,9 @@ func (p *PatrolService) Run(ctx context.Context, cfg Config, hqRoot string, grac
 		if queueErr := addManagerQueuePatrolFindings(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); queueErr != nil {
 			return PatrolReport{}, fmt.Errorf("patrol manager queue 分析失败：%w", queueErr)
 		}
+		if progressErr := addAssignmentProgressPatrolFindings(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); progressErr != nil {
+			return PatrolReport{}, fmt.Errorf("patrol assignment progress 分析失败：%w", progressErr)
+		}
 	}
 	first.report.GraceMS = grace.Milliseconds()
 	needsSecond := false
@@ -359,6 +362,41 @@ func addPatrolFinding(analysis *patrolAnalysis, finding PatrolFinding) {
 	}
 }
 
+func addAssignmentProgressPatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnapshot, cfg Config, hqRoot string, ledger *ledgerState, now time.Time) error {
+	backlogs, err := ledger.assignmentProgressBacklogs(cfg)
+	if err != nil {
+		return err
+	}
+	stallAfter, _, _ := cfg.managerQueueWatchdogPolicy()
+	for _, backlog := range backlogs {
+		status, statusErr := liveQueueTargetStatus(snapshot, cfg, hqRoot, backlog.Agent)
+		if statusErr != nil || (status != "idle" && status != "done") {
+			continue
+		}
+		selectedAt, err := parseOperationsTime("assignment progress selected_at", backlog.SelectedAt)
+		if err != nil {
+			return err
+		}
+		if now.Sub(selectedAt) < stallAfter {
+			continue
+		}
+		item := backlog.Items[0]
+		signals := make([]string, 0, len(backlog.Items))
+		for _, queued := range backlog.Items {
+			signals = append(signals, queued.AssignmentID+":"+queued.Status)
+		}
+		addPatrolFinding(analysis, PatrolFinding{
+			Category: "stalled", ObjectID: "assignment-progress:" + backlog.Agent, Agent: backlog.Agent,
+			SignalType: "idle_with_active_assignment", Signals: signals,
+			Message: fmt.Sprintf("agent status=%s 但仍有 %d 个 accepted/rework assignment 未 report；当前 case=%s status=%s basis=%s；纠正：继续原合同并运行 hq report，受阻必须 report --result blocked",
+				status, len(backlog.Items), item.CaseID, item.Status, backlog.BasisEventID),
+		})
+	}
+	analysis.report.Warnings = len(analysis.report.Findings)
+	sortPatrolFindings(analysis.report.Findings)
+	return nil
+}
+
 func addManagerQueuePatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnapshot, cfg Config, hqRoot string, ledger *ledgerState, now time.Time) error {
 	backlogs, err := ledger.managerQueueBacklogs(cfg)
 	if err != nil {
@@ -366,7 +404,7 @@ func addManagerQueuePatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnaps
 	}
 	stallAfter, _, _ := cfg.managerQueueWatchdogPolicy()
 	for _, backlog := range backlogs {
-		status, statusErr := liveQueueManagerStatus(snapshot, cfg, hqRoot, backlog.Manager)
+		status, statusErr := liveQueueTargetStatus(snapshot, cfg, hqRoot, backlog.Manager)
 		if statusErr != nil || (status != "idle" && status != "done") {
 			continue
 		}

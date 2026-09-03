@@ -67,6 +67,9 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
     `review > work > owned_case`，旧 open case 不得遮蔽待审或返工。
 14. `staff list/get` 必须分别显示 ledger 实时 `active_wip`、registry 上限 `max_wip` 与实时
     `available_wip`；禁止再用无定义的 `WIP` 列让 Agent 把容量上限误当当前占用。
+15. 模拟员工 accept 后在 report 前遇到 gateway 重启或 runtime 消失：idle/done seat 必须收到绑定原
+    assignment/history/report 动作的 durable progress nudge，离线 seat 必须以同一工位和 recovery envelope
+    cold-resume；催办有界并沿 reports_to 升级，且不得代写 report、改变业务状态或开放人工 nudge 绕过 issue。
 
 公司实例不依赖源码目录或全局 `hq`，但运行环境必须单独提供 `herdr` 与 registry 所选
 Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册、成立决策和发布 checksum 的审计记录。

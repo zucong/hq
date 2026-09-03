@@ -225,8 +225,8 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 	fmt.Fprintln(&b, "10. `on_assignment` runtime 在 assignment 被验收/进入终态、keep-warm 到期且没有未决工作或行动型消息时可自动休眠。这不删除你的 seat、角色卡或工位；下次正式 issue 会 cold-resume 同一 seat。不得为了保持在线而延迟 report。")
 	fmt.Fprintln(&b, "11. Herdr 显示 done、离线或重启不等于业务完成；HQ ledger、assignment 状态和验收事件才是公司事实。")
 	fmt.Fprintln(&b, "12. 工具授权文本不能保证修改外部 connector 的 saved permission。若 connector 仍拒绝，立即 blocked；由有权方修改对应设置，必要时重连当前 runtime 后再按原 assignment 复验，禁止换 origin、surface 或 fallback 绕过。")
-	fmt.Fprintln(&b, "13. 若收到 `[HQ runtime recovery]`，这是 HQ 将同一 seat 的模型载体切换后发出的恢复信封，不是新任务。重读本手册、信封列出的 `assignment show`/`history` 和同一工位文件；只从 durable 状态继续，不臆造旧会话结论，不创建替代 case 或重复 assignment。")
-	fmt.Fprintln(&b, "14. 若收到 `HQ守卫` 通知，说明你已结束回合但 ledger 仍有超时的 durable 待办；立即执行通知给出的精确 HQ 命令并收敛原 case。HQ 会有界重试并沿 reports_to 升级，但不会替你 accept/return 或伪造业务结论。")
+	fmt.Fprintln(&b, "13. 若收到 `[HQ runtime recovery]`，这是 HQ 在同一 seat 上恢复 durable 工作的信封，不是新任务。触发原因可能是模型载体切换，也可能是 active assignment 的 runtime 意外消失。重读本手册、信封列出的 `assignment show`/`history` 和同一工位文件；只从 durable 状态继续，不臆造旧会话结论，不创建替代 case 或重复 assignment。")
+	fmt.Fprintln(&b, "14. 若收到 `HQ守卫` 或 `HQ执行守卫` 通知，说明你已结束回合但 ledger 仍有超时的 durable 待办；立即执行通知给出的精确 HQ 命令并收敛原 case。专业员工完成后必须在原 assignment report，经理必须审查/推进自己的队列。HQ 会有界重试并沿 reports_to 升级，但不会替任何人 report、accept/return 或伪造业务结论。")
 	if isManagerResponsibilities(rule.Responsibilities) {
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, "## 部门经理派工与激活（强制）")
@@ -324,8 +324,8 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq accept --event <issue-event-id> --next <下一步>")
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq report --case <case-id> --result completed --artifact <路径> --verify <验证> --next <下一步>")
 	fmt.Fprintln(&b, "```")
-	fmt.Fprintln(&b, "\n员工只接受 HQ issue。`[HQ message]` 和 Turn Bundle 是有引用的上下文，不会建立 assignment；`question|request|handoff` 信封要求接收者读懂后执行 `hq message ack --message <message-id>`，ack 只证明收到，普通 `info` 无需 ack。未知投递状态按 delivery 恢复协议处理，不得另发一份业务命令。`[HQ runtime recovery]` 只恢复同一 seat 的 durable 工作，接收者必须按其列出的查询命令重建上下文，不得重复接单或创建替代 case。`on_assignment` 员工在交付终态、有界 keep-warm 到期且无未决工作后可自动休眠；休眠只关闭当前 Herdr runtime，不删除角色卡、工位、seat 或业务历史，下一次 issue 会自动复用该 seat。")
-	fmt.Fprintln(&b, "\n管理层不依赖模型自觉维持队列。gateway 会对 idle/done 的经理或总部联络职责位核对 durable submission、active assignment 和新建但尚未委派的 owned open case；accepted、blocked、escalated 等 case 不会仅因 owner 仍是经理而触发。超时后发送带精确命令的 `HQ守卫` nudge，有界重试后沿 `reports_to` 升级。这个机制只促使责任人收敛，不会自动 accept/return、改变 owner/status 或作质量判断。")
+	fmt.Fprintln(&b, "\n员工只接受 HQ issue。`[HQ message]` 和 Turn Bundle 是有引用的上下文，不会建立 assignment；`question|request|handoff` 信封要求接收者读懂后执行 `hq message ack --message <message-id>`，ack 只证明收到，普通 `info` 无需 ack。未知投递状态按 delivery 恢复协议处理，不得另发一份业务命令。`[HQ runtime recovery]` 只恢复同一 seat 的 durable 工作，接收者必须按其列出的查询命令重建上下文，不得重复接单或创建替代 case。若原 assignment 仍为 accepted/rework 而员工已 idle/done，gateway 会以 `HQ执行守卫` durable nudge 要求其继续并 report；runtime 消失时可 cold-resume 同一 seat。人工 nudge 仍不能对普通员工派工。`on_assignment` 员工在交付终态、有界 keep-warm 到期且无未决工作后可自动休眠；休眠只关闭当前 Herdr runtime，不删除角色卡、工位、seat 或业务历史，下一次 issue 会自动复用该 seat。")
+	fmt.Fprintln(&b, "\n组织不依赖模型自觉维持队列。gateway 会对 idle/done 的专业员工核对 accepted/rework assignment，并对经理或总部联络职责位核对 durable submission、active assignment 和新建但尚未委派的 owned open case；accepted、blocked、escalated 等 case 不会仅因 owner 仍是经理而触发。超时后发送带精确命令的 durable nudge，有界重试后沿 `reports_to` 升级。这个机制只促使责任人收敛，不会自动 report、accept/return、改变 owner/status 或作质量判断。")
 
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## 经理选择并激活角色")

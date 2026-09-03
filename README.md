@@ -546,6 +546,13 @@ assignment event 和原始 payload 有界重投，最多 `max_activation_redeliv
 经理或 `can_manage_staff` 角色先运行 `hq delivery status --id ...`；unknown 用原 `delivery resolve` 核对，
 确认未送达或 exhausted 时用原 `delivery retry`。不得创建第二个 case/assignment，也不得用裸 prompt 补派。
 
+员工 accept 后也不依赖模型自觉维持回合。若专业员工处于 `idle|done`，而原 assignment 长时间保持
+`accepted|rework`，assignment-progress watchdog 会发送带 `assignment show`、`history` 和 `report` 纠正动作的
+durable nudge；同一 basis 只做有界重试，随后沿 registry `reports_to` 升级。若 active assignment 的 runtime
+已消失，watchdog 会先收敛旧 session，再 cold-resume 同一 seat，并以 `[HQ runtime recovery]
+trigger=assignment_progress` 指示其只从原 assignment、工位文件和 ledger 恢复。该机制不替员工 report，
+不替经理验收，也不允许人工 `nudge` 绕过 `issue` 建立工作合同。
+
 经理和总部联络职责位不能只靠角色手册自觉清空队列。gateway 的 manager queue watchdog 会严格重放账本，
 识别三类 durable 待办：等待 accept/return 的下属 submission、经理本人尚未接单或尚未 report 的 assignment，
 以及经理新建但尚未形成 active assignment 的 `open` case。`accepted`、`blocked`、`escalated` 等历史或待外部动作
@@ -746,12 +753,12 @@ strict replay 会从持久化的真实 base payload 与 envelopes 重算每项 b
 ```
 
 - `doctor` 只读检查实例路径、registry、岗位手册、决策、Herdr、gateway 和账本健康；
-- `patrol` 使用两份 snapshot 区分 blocked、经理队列 stalled、编制漂移、orphan 和持续死亡候选，不自动验收、重启或关停；
+- `patrol` 使用两份 snapshot 区分 blocked、经理/员工 durable 队列 stalled、编制漂移、orphan 和持续死亡候选，不自动验收、代报、重启或关停；
 - `board` 展示结构化事项，`PRI` 列来自 case 规格的 `priority`，不会拿 finding `severity` 冒充事项优先级；`state.json` 缺失或损坏时可由账本重建；
 - `project list/show` 严格重放主账本；合法空间只会返回零个或一个冻结 `case.project`，department 分布由当前 registry 映射；
 - `assignment list/show` 展示冻结的委派、验收角色、due 和当前合同状态；
 - `index` 只提供固定字段查询，不开放任意 SQL；
-- `nudge` 和 `reminder` 负责回合边界提醒，可唤醒精确在岗的 `working|idle|done` 经理或总部联络职责位，但不改变 case 权限和业务结论；
+- `nudge` 和 `reminder` 负责回合边界提醒。人工 CLI 只能以它们唤醒精确在岗的 `working|idle|done` 经理或总部联络职责位；gateway 另可针对已冻结的 accepted/rework assignment 向原员工发送有界 progress nudge，但不能用它建立新任务或改变 case 权限和业务结论；
 - `estop` 冻结非豁免子角色，并以显式 release 精确恢复本次确认冻结集。
 
 ### On-assignment runtime 休眠

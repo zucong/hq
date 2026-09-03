@@ -145,8 +145,12 @@ func nudgeStateActive(state string) bool {
 	}
 }
 
-func isNudgeRecipient(cfg Config, rule AgentRule) bool {
+func isManualNudgeRecipient(cfg Config, rule AgentRule) bool {
 	return !rule.Disabled && (cfg.isManager(rule) || rule.hasResponsibility(roleApprovalWitness) || rule.hasResponsibility(roleAccountCloser))
+}
+
+func isNudgeRecipient(cfg Config, rule AgentRule) bool {
+	return !rule.Disabled && (rule.CanReceiveOrder || isManualNudgeRecipient(cfg, rule))
 }
 
 func (s *ledgerState) applyNudgeEvent(event Event, cfg Config) error {
@@ -410,6 +414,10 @@ func (a *App) cmdNudge(args []string) error {
 }
 
 func (a *App) cmdNudgeEnqueue(args []string) error {
+	return a.cmdNudgeEnqueueWithScope(args, false)
+}
+
+func (a *App) cmdNudgeEnqueueWithScope(args []string, allowAssignmentWorker bool) error {
 	fs := newLeafParser("nudge enqueue")
 	fs.SetOutput(a.Err)
 	id := fs.String("id", "", "稳定 nudge id")
@@ -439,7 +447,11 @@ func (a *App) cmdNudgeEnqueue(args []string) error {
 		return fmt.Errorf("--ttl 必须在 %s..%s", minimumNudgeTTL, maximumNudgeTTL)
 	}
 	rule, ok := a.Config.exactRule(strings.TrimSpace(*target))
-	if !ok || !isNudgeRecipient(a.Config, rule) {
+	allowed := ok && isManualNudgeRecipient(a.Config, rule)
+	if allowAssignmentWorker {
+		allowed = ok && isNudgeRecipient(a.Config, rule)
+	}
+	if !allowed {
 		return fmt.Errorf("--to 必须是精确登记的在职常驻经理或总部联络职责位")
 	}
 	now := a.operationsNow()
@@ -560,7 +572,7 @@ func (a *App) cmdNudgeStatus(args []string) error {
 func exactNudgeRecipient(snapshot HerdrSnapshot, cfg Config, hqRoot, recipient string) error {
 	rule, ok := cfg.exactRule(recipient)
 	if !ok || !isNudgeRecipient(cfg, rule) {
-		return fmt.Errorf("recipient %s 不再是精确登记的常驻经理或总部联络职责位", recipient)
+		return fmt.Errorf("recipient %s 不再是精确登记且可接收任务的在职 HQ seat", recipient)
 	}
 	var workspaceIDs []string
 	for _, workspace := range snapshot.Workspaces {
@@ -577,7 +589,7 @@ func exactNudgeRecipient(snapshot HerdrSnapshot, cfg Config, hqRoot, recipient s
 	for _, agent := range snapshot.Agents {
 		if agent.Name == recipient && agent.WorkspaceID == workspaceIDs[0] {
 			if agent.Status != "working" && agent.Status != "idle" && agent.Status != "done" {
-				return fmt.Errorf("recipient %s 当前 status=%s；nudge 只投递给 working|idle|done 的精确常驻职责位", recipient, agent.Status)
+				return fmt.Errorf("recipient %s 当前 status=%s；nudge 只投递给 working|idle|done 的精确在岗 seat", recipient, agent.Status)
 			}
 			return nil
 		}

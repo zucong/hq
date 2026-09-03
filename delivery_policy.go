@@ -290,6 +290,10 @@ func (a *App) coldResumeDeliveryTarget(target string) error {
 }
 
 func (a *App) coldResumeDeliveryTargetAdmitted(target string) error {
+	return a.coldResumeDeliveryTargetAdmittedWithOptions(target, runtimeStartOptions{})
+}
+
+func (a *App) coldResumeDeliveryTargetAdmittedWithOptions(target string, options runtimeStartOptions) error {
 	rule, ok := a.Config.exactRule(target)
 	if !ok {
 		return fmt.Errorf("cold-resume 目标未登记或已停用：%s", target)
@@ -329,7 +333,7 @@ func (a *App) coldResumeDeliveryTargetAdmitted(target string) error {
 	} else if mismatch != "" {
 		return fmt.Errorf("cold-resume 目标存在但不满足精确在岗合同：%s", mismatch)
 	}
-	return a.startHQAgentAdmitted(ctx, workspaceID, rule)
+	return a.startHQAgentAdmittedWithOptions(ctx, workspaceID, rule, options)
 }
 
 func (s *ledgerState) deliveryBudgetSpent(target string) int {
