@@ -92,7 +92,7 @@ func prepareDoctorEnv(t *testing.T) testEnv {
 		t.Fatal(err)
 	}
 	t.Setenv("HQ_HERDR_CAPTURE", e.herdrOutput)
-	example, err := os.ReadFile("config.example.yaml")
+	example, err := os.ReadFile(repositoryPath("examples", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

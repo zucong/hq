@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.0.0 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.1.0 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -48,7 +48,19 @@ HQ 的一个直接目标是避免“每做一步就新增一份 Markdown”的�
 
 ## 源码与公司实例
 
-本独立仓库的产品源码位于仓库根。HQ 部署后服务于一个具体的公司根，当前运行时布局为：
+本独立仓库按用途组织源码、文档、示例和发布工具：
+
+```text
+hq/
+├── cmd/hq/       # CLI 源码与同包测试
+├── docs/         # 架构设计与发布说明
+├── examples/     # registry 与组织规范示例
+├── scripts/      # 测试、验收和可复现发布工具
+├── README.md
+└── go.mod
+```
+
+HQ 部署后服务于一个具体的公司根，当前运行时布局为：
 
 ```text
 company-root/
@@ -99,11 +111,12 @@ cleanup_hq_smoke() {
   fi
 }
 trap cleanup_hq_smoke EXIT HUP INT TERM
-mkdir -p "$HQ_SMOKE_ROOT/hq" "$HQ_SMOKE_ROOT/tmp" "$HQ_SMOKE_ROOT/go-cache"
-cp ./*.go ./go.mod ./go.sum "$HQ_SMOKE_ROOT/hq/"
+mkdir -p "$HQ_SMOKE_ROOT/hq/cmd/hq" "$HQ_SMOKE_ROOT/tmp" "$HQ_SMOKE_ROOT/go-cache"
+cp ./cmd/hq/*.go "$HQ_SMOKE_ROOT/hq/cmd/hq/"
+cp ./go.mod ./go.sum "$HQ_SMOKE_ROOT/hq/"
 cd "$HQ_SMOKE_ROOT/hq"
 TMPDIR="$HQ_SMOKE_ROOT/tmp" GOCACHE="$HQ_SMOKE_ROOT/go-cache" \
-  go build -trimpath -o ./bin/hq .
+  go build -trimpath -o ./bin/hq ./cmd/hq
 ./bin/hq help
 ./bin/hq init "$HQ_SMOKE_ROOT/company" --silent \
   --company-name "Smoke Company" --owner ZC \
@@ -133,7 +146,7 @@ TMPDIR="$HQ_TEST_ROOT/tmp" GOCACHE="$HQ_TEST_ROOT/go-cache" \
   go test -count=1 -run '^TestRegistryPortabilityInitUpAndEnvelope$' -v ./...
 ```
 
-发布构建与安装见 [RELEASE.md](RELEASE.md)。
+发布构建与安装见 [发布说明](docs/RELEASE.md)，控制面设计见 [设计文档](docs/DESIGN.md)。
 
 ## 初始化公司
 
@@ -193,7 +206,7 @@ temperament、behavior anchor、duties、method、evidence 和 boundaries。HQ �
 重复项、汇报环、唯一职责位、权限组合、工位路径和全部 digest。规范原文会复制到
 `ceo-office/formation/organization-spec.yaml` 并绑定公司成立决策，作为不可变成立证据；运行时不读取它，
 `ceo-office/tools/hq/config.yaml` 仍是唯一实时组织注册表，因此该文件不是第二份 roster。
-完整的通用 schema 示例见 [`organization-spec.example.yaml`](organization-spec.example.yaml)；它只演示格式和最小治理不变量，不代表任何具体公司的组织模板。
+完整的通用 schema 示例见 [`examples/organization-spec.yaml`](examples/organization-spec.yaml)；它只演示格式和最小治理不变量，不代表任何具体公司的组织模板。
 
 每个模板都包含真实汇报线、根目录 `AGENT-HANDBOOK.md`，以及每个 seat 独立的
 `<department>/staff/<seat>/v<role-version>/AGENTS.md`。`ceo-office/tools/hq/config.yaml`
@@ -969,7 +982,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.0.0 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.0 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证
@@ -984,8 +997,8 @@ GOCACHE="${TMPDIR:-/tmp}/hq-go-cache" go vet ./...
 确定性真实公司流程模拟（注入 identity/runtime/transport，不连接在线 LLM）：
 
 ```bash
-go test -count=1 -run '^TestVirtualCompanyHeadquartersLaunchScenario$' .
-go test -count=1 -run '^TestVirtualCompanyDeliveryIncidentRecoveryScenario$' .
+go test -count=1 -run '^TestVirtualCompanyHeadquartersLaunchScenario$' ./cmd/hq
+go test -count=1 -run '^TestVirtualCompanyDeliveryIncidentRecoveryScenario$' ./cmd/hq
 ```
 
 第一个场景覆盖“总裁办—产品部—工程部”、纵向拆解、跨部门 quiet handoff、Turn Bundle、

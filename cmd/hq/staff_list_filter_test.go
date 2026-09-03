@@ -126,7 +126,7 @@ func TestStaffListReportsToFlagIsPublishedToManagers(t *testing.T) {
 		t.Fatalf("generated company handbook omits direct-report query:\n%s", handbook)
 	}
 
-	readme, err := os.ReadFile("README.md")
+	readme, err := os.ReadFile(repositoryPath("README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

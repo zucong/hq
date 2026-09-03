@@ -395,7 +395,7 @@ func TestInitOrganizationSpecRejectsSymlinkBeforeWriting(t *testing.T) {
 
 func TestOrganizationSpecExampleCompiles(t *testing.T) {
 	opts := initOptions{CompanyName: "Example", Owner: "OWNER", Workspace: "example-hq",
-		OrganizationSpec: "organization-spec.example.yaml", SecretaryKind: "codex", DefaultAgentKind: "codex", PermissionMode: "native"}
+		OrganizationSpec: repositoryPath("examples", "organization-spec.yaml"), SecretaryKind: "codex", DefaultAgentKind: "codex", PermissionMode: "native"}
 	compiled, err := loadAndCompileOrganizationSpec(opts.OrganizationSpec, opts)
 	if err != nil {
 		t.Fatal(err)

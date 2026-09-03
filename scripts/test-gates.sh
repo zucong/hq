@@ -48,7 +48,7 @@ echo "GATE 07 vet"
 go vet ./...
 
 echo "GATE 08 gofmt"
-gofmt -d ./*.go > "$gate_root/gofmt.diff"
+gofmt -d ./cmd/hq/*.go > "$gate_root/gofmt.diff"
 if [ -s "$gate_root/gofmt.diff" ]; then
   cat "$gate_root/gofmt.diff" >&2
   exit 1
@@ -56,7 +56,7 @@ fi
 
 echo "GATE 09 test-enumeration"
 listed=$(go test -list '^Test' ./... | awk '/^Test/{count++} END{print count+0}')
-source_count=$(awk '/^func Test/{count++} END{print count+0}' ./*_test.go)
+source_count=$(awk '/^func Test/{count++} END{print count+0}' ./cmd/hq/*_test.go)
 if [ "$listed" -ne "$source_count" ]; then
   echo "test enumeration mismatch: listed=$listed source=$source_count" >&2
   exit 1
@@ -64,7 +64,7 @@ fi
 echo "test_count=$listed"
 
 echo "GATE 10 current-build"
-go build -trimpath -o "$gate_root/hq" .
+go build -trimpath -o "$gate_root/hq" ./cmd/hq
 "$gate_root/hq" version --json
 
 echo "GATE 11 release-build"

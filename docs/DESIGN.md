@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.0.0 已正式发布；本文定义当前正式合同**
+状态：**v1.1.0 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -97,7 +97,7 @@ board / project / flow / history / index
 
 ### 源码与部署边界
 
-产品源码位于独立仓库根。一个公司实例以 `<company-root>/ceo-office` 为运行锚点，
+产品源码位于独立仓库的 `cmd/hq`，架构与发布文档位于 `docs`，示例位于 `examples`，质量与发布入口位于 `scripts`。一个公司实例以 `<company-root>/ceo-office` 为运行锚点，
 registry 固定为 `ceo-office/tools/hq/config.yaml`，业务数据固定为 `ceo-office/records`。
 源码可以独立构建和发布，但正式实例不允许通过 `--config`、`--data` 或 `--herdr` 改写这些信任根。
 
@@ -715,7 +715,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.0.0 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.0 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

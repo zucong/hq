@@ -599,7 +599,7 @@ func TestCLIReleaseInitHelpAndVersion(t *testing.T) {
 }
 
 func TestCLIReleaseREADMEConventionAndReleaseBaseline(t *testing.T) {
-	readme, err := os.ReadFile("README.md")
+	readme, err := os.ReadFile(repositoryPath("README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,12 +615,12 @@ func TestCLIReleaseREADMEConventionAndReleaseBaseline(t *testing.T) {
 			t.Fatalf("README mixed executable convention: %q", line)
 		}
 	}
-	for _, path := range []string{"scripts/release.sh", "RELEASE.md"} {
+	for _, path := range []string{repositoryPath("scripts", "release.sh"), repositoryPath("docs", "RELEASE.md")} {
 		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
 			t.Fatalf("release baseline missing %s: %v", path, err)
 		}
 	}
-	script, err := os.ReadFile("scripts/release.sh")
+	script, err := os.ReadFile(repositoryPath("scripts", "release.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +663,7 @@ func TestCLIReleaseAcceptance(t *testing.T) {
 
 func assertNoThirdLedgerDependencies(t *testing.T) {
 	t.Helper()
-	raw, err := os.ReadFile("go.mod")
+	raw, err := os.ReadFile(repositoryPath("go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}

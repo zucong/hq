@@ -3,12 +3,36 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func TestRepositoryLayoutContract(t *testing.T) {
+	for _, path := range []string{
+		repositoryPath("cmd", "hq", "main.go"),
+		repositoryPath("docs", "DESIGN.md"),
+		repositoryPath("docs", "RELEASE.md"),
+		repositoryPath("examples", "config.yaml"),
+		repositoryPath("examples", "organization-spec.yaml"),
+		repositoryPath("scripts", "test-gates.sh"),
+	} {
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("repository layout missing regular file %s: %v", path, err)
+		}
+	}
+	rootGoFiles, err := filepath.Glob(repositoryPath("*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rootGoFiles) != 0 {
+		t.Fatalf("repository root must not contain Go implementation files: %v", rootGoFiles)
+	}
+}
+
 func TestDocumentationContractREADMEDiscoversCurrentIsolatedRoot(t *testing.T) {
-	raw, err := os.ReadFile("README.md")
+	raw, err := os.ReadFile(repositoryPath("README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +56,7 @@ func TestDocumentationContractREADMEDiscoversCurrentIsolatedRoot(t *testing.T) {
 }
 
 func TestDocumentationContractREADMEPublishesCurrentRegistryAndBootstrap(t *testing.T) {
-	raw, err := os.ReadFile("README.md")
+	raw, err := os.ReadFile(repositoryPath("README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,9 +101,9 @@ func TestDocumentationContractREADMEPublishesCurrentRegistryAndBootstrap(t *test
 
 func TestDocumentationContractPublishesOnlyCurrentFormalSchemas(t *testing.T) {
 	files := []string{
-		"README.md",
-		"DESIGN.md",
-		"RELEASE.md",
+		repositoryPath("README.md"),
+		repositoryPath("docs", "DESIGN.md"),
+		repositoryPath("docs", "RELEASE.md"),
 	}
 	forbidden := []string{
 		"v1 → v2",
@@ -121,12 +145,12 @@ func TestDocumentationContractPublishesOnlyCurrentFormalSchemas(t *testing.T) {
 }
 
 func TestDocumentationContractNamesFormalReleaseArtifact(t *testing.T) {
-	raw, err := os.ReadFile("RELEASE.md")
+	raw, err := os.ReadFile(repositoryPath("docs", "RELEASE.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	release := string(raw)
-	for _, want := range []string{"v1.0.0", "/tmp/hq-v1.0.0-release", "首个正式制品"} {
+	for _, want := range []string{"v1.1.0", "/tmp/hq-v1.1.0-release", "目录结构整理版本"} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("RELEASE.md missing first-release contract %q", want)
 		}
@@ -194,7 +218,7 @@ func TestDocumentationContractApprovalHelpDoesNotAdvertiseRemovedReusableMode(t 
 }
 
 func TestDocumentationContractPublishesDurableManagerEscalation(t *testing.T) {
-	for _, path := range []string{"README.md", "DESIGN.md"} {
+	for _, path := range []string{repositoryPath("README.md"), repositoryPath("docs", "DESIGN.md")} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -226,17 +250,17 @@ func TestDocumentationContractPublishesDurableManagerEscalation(t *testing.T) {
 
 func TestDocumentationContractPublishesBoundedRuntimeHibernationAndRecovery(t *testing.T) {
 	contracts := map[string][]string{
-		"README.md": {
+		repositoryPath("README.md"): {
 			"keep_warm", "runtime status", "runtime reap --agent <slug> --retry-unknown",
 			"orphan_tab_without_agent", "conditional close", "always` 永不自动关闭",
 			"hq message ack --message <message-id>", "未 ack 会同时阻止发送方和接收方",
 		},
-		"DESIGN.md": {
+		repositoryPath("docs", "DESIGN.md"): {
 			"Runtime hibernation 与 cold-resume", "hibernate_attempting|hibernate_unknown",
 			"零 origin、零 WIP", "event_accepted|event_returned", "conditional close/CAS",
 			"hq message ack --message <message-id>", "Ack 只证明收到",
 		},
-		"RELEASE.md": {
+		repositoryPath("docs", "RELEASE.md"): {
 			"有界 `keep_warm`", "runtime status", "--retry-unknown", "同 seat cold-resume", "always` 席位不被自动关闭",
 		},
 	}

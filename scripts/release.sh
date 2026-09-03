@@ -80,7 +80,7 @@ for target in darwin/arm64 linux/amd64 linux/arm64; do
   goos=${target%/*}
   goarch=${target#*/}
   name="hq_${version}_${goos}_${goarch}"
-  (cd "$source_dir" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$ldflags" -o "$stage/$name" .)
+  (cd "$source_dir" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$ldflags" -o "$stage/$name" ./cmd/hq)
 done
 
 {

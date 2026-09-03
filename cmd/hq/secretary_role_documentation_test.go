@@ -70,7 +70,7 @@ func TestGenericHandbookAndDocsDoNotMakeSecretaryAProperName(t *testing.T) {
 		t.Fatalf("company handbook must not depend on a fixture name:\n%s", handbook)
 	}
 
-	for _, path := range []string{"README.md", "DESIGN.md"} {
+	for _, path := range []string{repositoryPath("README.md"), repositoryPath("docs", "DESIGN.md")} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -85,7 +85,7 @@ func TestGenericHandbookAndDocsDoNotMakeSecretaryAProperName(t *testing.T) {
 			t.Fatalf("%s must not make a fixture name part of the generic product contract", path)
 		}
 	}
-	readmeRaw, err := os.ReadFile("README.md")
+	readmeRaw, err := os.ReadFile(repositoryPath("README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

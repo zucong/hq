@@ -84,7 +84,7 @@ func TestCompanyAndRepositoryDocsPublishManagerAuthorizationMatrix(t *testing.T)
 		}
 	}
 
-	for _, path := range []string{"README.md", "DESIGN.md"} {
+	for _, path := range []string{repositoryPath("README.md"), repositoryPath("docs", "DESIGN.md")} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

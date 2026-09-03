@@ -29,7 +29,7 @@ func TestDeploymentContractUpHelpMakesSafeSyntheticPathDiscoverable(t *testing.T
 }
 
 func TestDeploymentContractREADMEPublishesOfficialFakeUpFixture(t *testing.T) {
-	raw, err := os.ReadFile("README.md")
+	raw, err := os.ReadFile(repositoryPath("README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

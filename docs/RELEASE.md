@@ -1,12 +1,20 @@
-# HQ v1.0.0 正式发布与安装
+# HQ v1.1.0 正式发布与安装
 
-HQ v1.0.0 是首个正式制品。本文定义它的构建、验证和新公司安装流程。该制品只配套
+HQ v1.1.0 是目录结构整理版本：源码、测试、文档、示例与发布工具已按用途归位，CLI、registry v3、
+event v3 及公司实例布局保持不变。本文定义它的构建、验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
 
+## v1.1.0 结构变更
+
+- Go CLI 与同包测试统一位于 `cmd/hq`，源码构建目标为 `./cmd/hq`；
+- 设计和发布文档位于 `docs`，可复制示例位于 `examples`，发布门禁仍统一从 `scripts` 进入；
+- 公司实例中的 `ceo-office/tools/hq/bin/hq`、`config.yaml`、records、socket 和 workspace 合同没有变化；
+- 这是源码仓库布局变更，不要求迁移 registry、event ledger 或公司工位。
+
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.0.0 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 v1.1.0 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -23,8 +31,8 @@ fail closed，并由公司所有者明确从 v1.0.0 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.0.0 <完整小写commit> /tmp/hq-v1.0.0-release
-./scripts/release.sh verify /tmp/hq-v1.0.0-release
+./scripts/release.sh build v1.1.0 <完整小写commit> /tmp/hq-v1.1.0-release
+./scripts/release.sh verify /tmp/hq-v1.1.0-release
 ./scripts/test-gates.sh
 ```
 
@@ -105,7 +113,7 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
 
 ## 发布完成条件
 
-首次发布只有同时满足以下条件才算完成：
+正式发布只有同时满足以下条件才算完成：
 
 - release manifest 与三平台 checksum 验证通过；
 - 当前平台 binary 报告正确 version、commit、Go 和 platform；

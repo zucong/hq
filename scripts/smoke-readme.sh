@@ -15,10 +15,11 @@ cleanup_readme_smoke() {
   if [ -n "${smoke_root:-}" ] && [ -d "$smoke_root" ]; then rm -rf -- "$smoke_root"; fi
 }
 trap cleanup_readme_smoke EXIT HUP INT TERM
-mkdir -p "$smoke_root/hq" "$smoke_root/tmp" "$smoke_root/go-cache" "$smoke_root/home" "$smoke_root/empty-path"
-cp "$source_dir"/*.go "$source_dir/go.mod" "$source_dir/go.sum" "$smoke_root/hq/"
+mkdir -p "$smoke_root/hq/cmd/hq" "$smoke_root/tmp" "$smoke_root/go-cache" "$smoke_root/home" "$smoke_root/empty-path"
+cp "$source_dir"/cmd/hq/*.go "$smoke_root/hq/cmd/hq/"
+cp "$source_dir/go.mod" "$source_dir/go.sum" "$smoke_root/hq/"
 cd "$smoke_root/hq"
-TMPDIR="$smoke_root/tmp" GOCACHE="$smoke_root/go-cache" go build -trimpath -o ./bin/hq .
+TMPDIR="$smoke_root/tmp" GOCACHE="$smoke_root/go-cache" go build -trimpath -o ./bin/hq ./cmd/hq
 ./bin/hq help >/dev/null
 run_clean() {
   env -i PATH="$smoke_root/empty-path" HOME="$smoke_root/home" TMPDIR="$smoke_root/tmp" "$@"
