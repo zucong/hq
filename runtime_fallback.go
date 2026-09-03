@@ -8,13 +8,15 @@ import (
 )
 
 const (
-	contentSafeguardMarker = "This content can't be shown"
-	fallbackPendingReason  = "content_safeguard fallback_pending"
+	contentSafeguardMarker  = "This content can't be shown"
+	fallbackPendingReason   = "content_safeguard fallback_pending"
+	maxRuntimeRecoveryItems = 8
 )
 
 type runtimeRecoveryWork struct {
 	assignments []AssignmentView
 	cases       []*CaseState
+	omitted     int
 }
 
 func terminalShowsContentSafeguard(raw []byte) bool {
@@ -37,20 +39,32 @@ func (a *App) runtimeRecoveryWorkFor(agent string) (runtimeRecoveryWork, error) 
 	caseSeen := map[string]bool{}
 	for _, view := range ledger.assignmentViews() {
 		assignment := ledger.assignments[view.AssignmentEventID]
-		if assignment == nil || assignment.Recipient != agent || assignment.Consumed {
+		if assignment == nil || assignment.Recipient != agent || assignment.Consumed ||
+			(assignment.Status != "issued" && assignment.Status != "accepted" && assignment.Status != "rework") {
 			continue
 		}
 		work.assignments = append(work.assignments, view)
 		caseSeen[view.CaseID] = true
 	}
 	for _, state := range ledger.snapshot.Cases {
-		if state == nil || state.Owner != agent || state.Status == string(statusClosed) || caseSeen[state.ID] {
+		// Ownership alone does not make historical or externally blocked work
+		// actionable. Match the manager queue contract: only an unassigned open
+		// case may enter a runtime recovery manifest.
+		if state == nil || state.Owner != agent || state.Status != string(statusOpen) || caseSeen[state.ID] {
 			continue
 		}
 		work.cases = append(work.cases, state)
 	}
 	sort.Slice(work.assignments, func(i, j int) bool { return work.assignments[i].AssignmentID < work.assignments[j].AssignmentID })
 	sort.Slice(work.cases, func(i, j int) bool { return work.cases[i].ID < work.cases[j].ID })
+	if len(work.assignments) >= maxRuntimeRecoveryItems {
+		work.omitted = len(work.assignments) - maxRuntimeRecoveryItems + len(work.cases)
+		work.assignments = work.assignments[:maxRuntimeRecoveryItems]
+		work.cases = nil
+	} else if remaining := maxRuntimeRecoveryItems - len(work.assignments); len(work.cases) > remaining {
+		work.omitted = len(work.cases) - remaining
+		work.cases = work.cases[:remaining]
+	}
 	return work, nil
 }
 
@@ -71,6 +85,9 @@ func runtimeRecoveryEnvelope(rule AgentRule, policy RuntimeFallbackPolicy, work 
 	}
 	for _, state := range work.cases {
 		lines = append(lines, fmt.Sprintf("ACTIVE_OWNED_CASE id=%s version=%d status=%s title=%q；先运行 `hq case show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。", state.ID, state.Version, state.Status, state.Title, state.ID, state.ID))
+	}
+	if work.omitted > 0 {
+		lines = append(lines, fmt.Sprintf("另有 %d 项 actionable durable work 未在本信封展开；运行 `hq inbox` 与 `hq assignment list` 读取完整队列，按 durable 状态处理，不要猜测。", work.omitted))
 	}
 	lines = append(lines, "先完成上述核验，再继续未完成工作；不要创建替代 case 或重复 assignment。")
 	return strings.Join(lines, "\n")

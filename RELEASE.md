@@ -74,7 +74,8 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
     thread 变为其他 model/effort，patrol 必须报 `runtime_profile_mismatch`，watcher 不中断
     working/blocked，只在 idle/done 关闭旧 tab、用同一 seat/workstation 启动并投递 durable recovery。
     ambiguous CloseTab 必须进入 `profile_repair_unknown`、不得启动第二个 runtime，且报错必须给出单 seat
-    `runtime repair-profile --retry-unknown` 纠正命令。
+    `runtime repair-profile --retry-unknown` 纠正命令。恢复信封必须排除 `accepted|finding_accepted|blocked|needs_decision`
+    等非 actionable owned case，只包含可继续的 assignment/owned open case，并把展开项限制为 8；溢出要求查询 ledger。
 
 公司实例不依赖源码目录或全局 `hq`，但运行环境必须单独提供 `herdr` 与 registry 所选
 Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册、成立决策和发布 checksum 的审计记录。
@@ -117,7 +118,7 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
 - 启用 runtime fallback 时，精确 provider safeguard 证据可从 primary 收敛到 fallback，同一 seat/
   workstation/assignment/case 保持连续，且旧 stop、新 start 与 recovery delivery 都有 session 审计事实。
 - 启用 runtime profile 时，显式 model/effort argv、terminal footer 反查、patrol drift、idle/done 安全恢复、
-  working/blocked 延后、unknown 单 seat 人工栅栏和 `profile_recovery_sent` 审计均通过。
+  working/blocked 延后、unknown 单 seat 人工栅栏、actionable-only 有界恢复清单和 `profile_recovery_sent` 审计均通过。
 - issue `sent` 与 assignment activation 必须分层可见；同 ID/payload 重投、unknown resolve、exhausted retry、
   ledger 防伪和 accept 后停止均通过测试。
 - 空闲经理的 durable actionable queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒、向上升级；同一

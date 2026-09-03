@@ -270,6 +270,9 @@ func runtimeProfileRecoveryEnvelope(rule AgentRule, expected, observed runtimePr
 	for _, state := range work.cases {
 		lines = append(lines, fmt.Sprintf("ACTIVE_OWNED_CASE id=%s version=%d status=%s title=%q；先运行 `hq case show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。", state.ID, state.Version, state.Status, state.Title, state.ID, state.ID))
 	}
+	if work.omitted > 0 {
+		lines = append(lines, fmt.Sprintf("另有 %d 项 actionable durable work 未在本信封展开；运行 `hq inbox` 与 `hq assignment list` 读取完整队列，按 durable 状态处理，不要猜测。", work.omitted))
+	}
 	if work.empty() {
 		lines = append(lines, "当前没有需要恢复的 durable assignment/case；完整读取本工位 AGENTS.md 后结束本回合，等待 HQ 派工。")
 	} else {

@@ -358,8 +358,10 @@ patrol 将无法读取的 profile 报为 `runtime_profile_unverified`，将不�
 runtime-seat、ESTOP admission、up 和 registry 锁序，并在 CloseTab 前二次核对 incarnation、status 和终端 profile。
 
 session 诊断为 `profile_repair_attempting|failed|unknown`。只有 snapshot 证明旧 tab absence 才记 stopped
-并用同 seat/workstation 启动新会话；recovery envelope 仅从严格重放的 assignment/case 恢复，投递后记
-`profile_recovery_sent`。unknown 禁止自动重试；只能在人工核验同一 incarnation/tab 后对单一 seat 执行
+并用同 seat/workstation 启动新会话；recovery envelope 仅从严格重放的 actionable work 恢复：需要该 seat
+继续处理的 `issued|accepted|rework` assignment，以及无 active assignment 的 owned `open` case。`accepted`、
+`finding_accepted`、`blocked`、`needs_decision` 等历史或外部等待状态不得仅因 owner 未变而进入信封。清单最多
+展开 8 项，溢出只记录数量并让 Agent 查询 ledger；投递后记 `profile_recovery_sent`。unknown 禁止自动重试；只能在人工核验同一 incarnation/tab 后对单一 seat 执行
 `hq --direct runtime repair-profile --agent <seat> --retry-unknown`，避免延迟 CloseTab 与新 runtime 双占座。
 
 ### Runtime carrier fallback
@@ -377,7 +379,7 @@ CloseTab 后只有 snapshot 证明 tab absence 才写 `stopped` 并启动新 kin
 `hq --direct runtime fallback --agent <seat> --retry-unknown`；该命令重走终端证据、binding 和 tab-absence 栅栏，
 不接受批量 target。若旧 tab 已消失，watcher 可用 snapshot 补记 stopped 后前滚，不会再调用 CloseTab。
 
-新载体的 recovery envelope 从严格重放的 ledger 列出 active assignment 和 owned case，要求新会话重读当前
+新载体的 recovery envelope 沿用 runtime profile 的 actionable-only、有界清单合同，要求新会话重读当前
 `AGENTS.md`、`assignment show`、`history` 与同一 workstation。HQ 不声称能复制前一模型的隐藏 transcript；
 它保证的是组织身份与持久任务事实连续。投递确认后追加 `fallback_recovery_sent`；如果仅该记账失败，
 下一轮可幂等重发 recovery envelope，不重建 case/assignment。
@@ -575,7 +577,8 @@ activation acknowledgement 之后由独立 assignment-progress watchdog 兜底�
 查询冻结 assignment/history 并在原 case report；有界催办后沿 `reports_to` 升级。若 runtime 已消失且 policy 为
 `on_assignment|always`，先收敛旧 session，再在同一 seat/workstation cold-resume，并追加
 `[HQ runtime recovery] trigger=assignment_progress`，不复制隐藏会话。所有这些动作都不生成第二个 assignment、
-不替员工 report、不替经理验收；人工 nudge 仍只面向管理/总部职责位，不能成为绕过 issue 的派工通道。
+不替员工 report、不替经理验收；恢复清单同样只含 actionable work、最多展开 8 项，溢出由 Agent 查询 ledger；
+人工 nudge 仍只面向管理/总部职责位，不能成为绕过 issue 的派工通道。
 
 `delivery consume` 与 accept-time context render 会在 ledger flock 内选择、输出并提交 claim，从而拒绝并发
 bundle/consume 抢占；但 stdout/调用方输出不是 durable transport。若进程在 render 成功后、写入 journal intent

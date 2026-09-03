@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,6 +50,79 @@ func TestTerminalShowsContentSafeguardRequiresTerminalRefusalState(t *testing.T)
 	}
 	if terminalShowsContentSafeguard([]byte("task text quotes: This content can't be shown and Trusted Access:")) {
 		t.Fatal("quoted marker without provider refusal/footer was accepted")
+	}
+}
+
+func TestRuntimeRecoveryWorkFiltersHistoricalStatesAndBoundsManifest(t *testing.T) {
+	e := setupTestEnv(t)
+	manager := "zantianyou"
+	worker := "eng-developer"
+	e.setActor(t, manager, "recovery:manager", filepath.Join(e.root, "engineering"))
+	source := writeTestFile(t, filepath.Join(e.root, "engineering", "runtime-recovery-source.md"), "# runtime recovery source\n")
+	artifact := writeTestFile(t, filepath.Join(e.root, "engineering", "runtime-recovery-artifact.md"), "# runtime recovery artifact\n")
+
+	runTestCommand(t, e, "case", "create", "--id", "RECOVERY-ROOT", "--title", "Recovery root", "--project", "virtual-company-v2", "--source", source)
+	runTestCommand(t, e, "case", "create", "--id", "RECOVERY-HISTORICAL", "--parent", "RECOVERY-ROOT", "--title", "Historical accepted case", "--source", source)
+	runTestCommand(t, e, "issue", "--case", "RECOVERY-HISTORICAL", "--to", worker, "--next", "Complete the historical case")
+	events, err := NewStore(e.data).ReadAll(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued := latestCaseEvent(events, "RECOVERY-HISTORICAL", "issue_sent")
+	e.setActor(t, worker, "recovery:worker", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "accept", "--event", issued.ID, "--next", "Execute")
+	runTestCommand(t, e, "report", "--case", "RECOVERY-HISTORICAL", "--result", "completed", "--artifact", artifact, "--verify", "verified", "--next", "Review")
+	events, err = NewStore(e.data).ReadAll(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reported := latestCaseEvent(events, "RECOVERY-HISTORICAL", "report_sent")
+	e.setActor(t, manager, "recovery:manager", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "accept", "--event", reported.ID, "--next", "Accepted")
+
+	// A submitted assignment is awaiting its reviewer, not more work from the
+	// assignee, so it must not be reconstructed as active assignee work.
+	runTestCommand(t, e, "case", "create", "--id", "RECOVERY-SUBMITTED", "--parent", "RECOVERY-ROOT", "--title", "Submitted case", "--source", source)
+	runTestCommand(t, e, "issue", "--case", "RECOVERY-SUBMITTED", "--to", worker, "--next", "Submit for review")
+	events, err = NewStore(e.data).ReadAll(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued = latestCaseEvent(events, "RECOVERY-SUBMITTED", "issue_sent")
+	e.setActor(t, worker, "recovery:worker", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "accept", "--event", issued.ID, "--next", "Execute")
+	runTestCommand(t, e, "report", "--case", "RECOVERY-SUBMITTED", "--result", "completed", "--artifact", artifact, "--verify", "verified", "--next", "Review")
+	workerWork, err := e.app(t).runtimeRecoveryWorkFor(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !workerWork.empty() || workerWork.omitted != 0 {
+		t.Fatalf("submitted assignment was falsely actionable for assignee: %+v", workerWork)
+	}
+
+	e.setActor(t, manager, "recovery:manager", filepath.Join(e.root, "engineering"))
+	for index := 0; index < maxRuntimeRecoveryItems+1; index++ {
+		caseID := fmt.Sprintf("RECOVERY-OPEN-%02d", index)
+		runTestCommand(t, e, "case", "create", "--id", caseID, "--parent", "RECOVERY-ROOT", "--title", caseID, "--source", source)
+	}
+
+	work, err := e.app(t).runtimeRecoveryWorkFor(manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(work.assignments) != 0 || len(work.cases) != maxRuntimeRecoveryItems || work.omitted != 2 {
+		t.Fatalf("unexpected bounded recovery work: assignments=%d cases=%d omitted=%d", len(work.assignments), len(work.cases), work.omitted)
+	}
+	for _, state := range work.cases {
+		if state.Status != string(statusOpen) || state.ID == "RECOVERY-HISTORICAL" || state.ID == "RECOVERY-SUBMITTED" {
+			t.Fatalf("historical/non-open case leaked into recovery manifest: %+v", state)
+		}
+	}
+	prompt := runtimeProfileRecoveryEnvelope(AgentRule{Name: manager}, runtimeProfile{Model: "sol", ReasoningEffort: "medium"}, runtimeProfile{Model: "luna", ReasoningEffort: "low"}, work)
+	if strings.Contains(prompt, "RECOVERY-HISTORICAL") || strings.Contains(prompt, "RECOVERY-SUBMITTED") ||
+		!strings.Contains(prompt, "另有 2 项 actionable durable work 未在本信封展开") ||
+		strings.Count(prompt, "ACTIVE_OWNED_CASE") != maxRuntimeRecoveryItems {
+		t.Fatalf("runtime recovery prompt was misleading or unbounded:\n%s", prompt)
 	}
 }
 

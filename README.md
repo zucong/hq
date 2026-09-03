@@ -560,7 +560,8 @@ assignment event 和原始 payload 有界重投，最多 `max_activation_redeliv
 durable nudge；同一 basis 只做有界重试，随后沿 registry `reports_to` 升级。若 active assignment 的 runtime
 已消失，watchdog 会先收敛旧 session，再 cold-resume 同一 seat，并以 `[HQ runtime recovery]
 trigger=assignment_progress` 指示其只从原 assignment、工位文件和 ledger 恢复。该机制不替员工 report，
-不替经理验收，也不允许人工 `nudge` 绕过 `issue` 建立工作合同。
+不替经理验收，也不允许人工 `nudge` 绕过 `issue` 建立工作合同。该恢复信封同样遵守 actionable-only、
+最多展开 8 项并让 Agent 从 ledger 查询溢出项的合同。
 
 经理和总部联络职责位不能只靠角色手册自觉清空队列。gateway 的 manager queue watchdog 会严格重放账本，
 识别三类 durable 待办：等待 accept/return 的下属 submission、经理本人尚未接单或尚未 report 的 assignment，
@@ -814,7 +815,10 @@ incarnation 自动关闭。`runtime status/reap` 会持续显示 `orphan_tab_wit
 status 为 `idle|done` 时恢复；`working|blocked` 不会被中断。恢复共用 runtime-seat、ESTOP、up 和 current-registry
 租约，先记 `profile_repair_attempting`，只在 snapshot 证明旧 tab 消失后才写 `stopped` 并用同一
 seat/workstation 重建。新会话收到基于 durable assignment/case 的 recovery envelope，成功后写
-`profile_recovery_sent`；它不修改 Role Card、seat digest、assignment 或 WIP。
+`profile_recovery_sent`；它不修改 Role Card、seat digest、assignment 或 WIP。恢复清单只包含需要该 seat
+继续处理的 `issued|accepted|rework` assignment，以及尚未委派的 owned `open` case；已验收、finding 已接收、
+blocked 或 needs-decision 的历史 case 不会被误报为 active work。信封最多展开 8 项，超出的 actionable 工作
+只报告数量并要求通过 `hq inbox`/`hq assignment list` 读取，避免一次运行修复把历史账本灌入上下文。
 
 CloseTab definitely-not-run 进入 `profile_repair_failed` 并可由 watcher 安全重试；结果不明则进入
 `profile_repair_unknown`，禁止自动启动第二个 runtime。运维角色核验同一 incarnation/tab 仍在后，使用
@@ -832,8 +836,9 @@ CloseTab definitely-not-run 进入 `profile_repair_failed` 并可由 watcher 安
 
 状态机先记录 `fallback_attempting`，只有 Herdr snapshot 明确证明旧 tab 消失后，才追加 `stopped`
 并启动新载体。关闭结果不确定时进入 `fallback_unknown`，禁止自动启动第二个运行实例。新 session
-使用同一 seat、工位和 HQ 账本；恢复信封列出 active assignment/case 及精确查询命令。隐藏模型聊天记录不会被宣称为跨供应商复制；
-连续性来自 durable ledger、版本化 `AGENTS.md` 和同一 workstation。`fallback_recovery_sent` 是恢复信封已确认投递的审计事实；
+使用同一 seat、工位和 HQ 账本；恢复信封沿用上述 actionable-only、最多 8 项的清单合同并给出精确查询命令。
+隐藏模型聊天记录不会被宣称为跨供应商复制；连续性来自 durable ledger、版本化 `AGENTS.md` 和同一 workstation。
+`fallback_recovery_sent` 是恢复信封已确认投递的审计事实；
 记账失败时允许幂等重发该恢复信封，但不重建 case 或 assignment。
 
 `fallback_attempting|fallback_unknown` 不会被自动重试。新业务在写入 origin/WIP 前会被 fail closed，并告诉
