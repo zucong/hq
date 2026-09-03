@@ -51,6 +51,29 @@ func managerQueueSubmittedFixture(t *testing.T, caseID string) (testEnv, Config,
 	return e, cfg, issue, report
 }
 
+func TestManagerQueuePriorityDominatesAgeWithinActionableWork(t *testing.T) {
+	oldest := "2026-01-01T00:00:00Z"
+	newer := "2026-01-02T00:00:00Z"
+	if !managerQueueItemLess(
+		ManagerQueueItem{Kind: "review", StatusUpdatedAt: newer},
+		ManagerQueueItem{Kind: "work", StatusUpdatedAt: oldest},
+	) {
+		t.Fatal("newer submission review must outrank older manager work")
+	}
+	if !managerQueueItemLess(
+		ManagerQueueItem{Kind: "work", StatusUpdatedAt: newer},
+		ManagerQueueItem{Kind: "owned_case", StatusUpdatedAt: oldest},
+	) {
+		t.Fatal("newer active/rework manager assignment must outrank older unassigned open case")
+	}
+	if !managerQueueItemLess(
+		ManagerQueueItem{Kind: "work", CaseID: "OLDER", StatusUpdatedAt: oldest},
+		ManagerQueueItem{Kind: "work", CaseID: "NEWER", StatusUpdatedAt: newer},
+	) {
+		t.Fatal("age must remain FIFO within the same manager queue priority")
+	}
+}
+
 func TestManagerQueueWatchdogFreezesUncertainPromptAndEscalatesForReconcile(t *testing.T) {
 	e, cfg, _, report := managerQueueSubmittedFixture(t, "QUEUE-WATCHDOG-UNKNOWN")
 	reportedAt, err := parseOperationsTime("report.at", report.At)

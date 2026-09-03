@@ -455,6 +455,9 @@ HQ 错误永远不会建议用裸 `herdr prompt` 绕过账本。
 # 经理从 registry 列出自己的直属 seat；该命令不查询 Herdr runtime
 ./bin/hq staff list --reports-to <manager-agent-slug>
 
+# 输出中的 ACTIVE_WIP 是 ledger 中尚未收敛的实时占用，MAX_WIP 是编制容量上限，
+# AVAILABLE_WIP=max(MAX_WIP-ACTIVE_WIP, 0)；不得把 MAX_WIP 当作当前占用。
+
 # 经理拆解父 case；新子 case 先由经理持有
 ./bin/hq case create --id CHILD-ID --parent CASE-ID --title <子事项> \
   --objective <目标> --acceptance <验收> --constraints <约束> --priority P1 \
@@ -528,8 +531,10 @@ assignment/case、正式投递、行动型消息确认或 reminder/nudge 时自�
 全部业务历史不变；下一条正式 issue 复用同一 seat cold-resume。若 HQ 报告旧关闭为
 `hibernate_attempting`/`hibernate_unknown`，新 issue 会在写 origin 和预占 WIP 之前 fail closed；具有
 `can_manage_staff` 的运维者必须先执行报错给出的 `runtime status/reap --retry-unknown`，不得绕过。
-`hq staff list --reports-to <manager-agent-slug>` 只读精确筛选 registry 中的直属 seat，默认排除已停用 seat；
-只在组织治理或审计时才同时传入 `--all`。
+`hq staff list --reports-to <manager-agent-slug>` 精确筛选 registry 中的直属 seat，默认排除已停用 seat；
+它严格重放 ledger，并分别输出 `ACTIVE_WIP`（尚未收敛的 assignment/delivery 实时占用）、`MAX_WIP`
+（编制容量上限）和 `AVAILABLE_WIP`（当前可派容量）。`MAX_WIP=1` 不表示已有一项任务；经理只能依据
+`AVAILABLE_WIP` 判断能否派工。只在组织治理或审计时才同时传入 `--all`。
 
 `issue_sent` 只证明 Herdr 已接受门铃注入，不证明员工看见任务或执行了 `accept`。gateway 的 assignment
 activation watchdog 会在 `assignment_accept_timeout` 后核对原 assignment 仍为 `issued`、冻结 seat 精确在线、
@@ -543,8 +548,10 @@ assignment event 和原始 payload 有界重投，最多 `max_activation_redeliv
 经理和总部联络职责位不能只靠角色手册自觉清空队列。gateway 的 manager queue watchdog 会严格重放账本，
 识别三类 durable 待办：等待 accept/return 的下属 submission、经理本人尚未接单或尚未 report 的 assignment，
 以及经理新建但尚未形成 active assignment 的 `open` case。`accepted`、`blocked`、`escalated` 等历史或待外部动作
-状态不会仅因 owner 仍是经理而触发误催。只有目标精确在岗且 Herdr 状态为 `idle|done`，最老待办
-又超过 `manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。相同最老 status event
+状态不会仅因 owner 仍是经理而触发误催。队列固定按“待审 submission → 经理本人的 active/rework assignment
+→ 尚未委派的 owned open case”排序，并只在同一优先级内按时间 FIFO；低优先级旧 case 不得遮蔽返工或验收。
+只有目标精确在岗且 Herdr 状态为 `idle|done`，当前最高优先级待办又超过
+`manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。该项 status event
 作为稳定 basis；提醒至少间隔一个 stall timeout，最多 `max_manager_queue_nudges` 次。最后一次提醒后仍超过
 `manager_queue_escalate_after`，HQ 会把问题升级给 registry 中的 `reports_to`。Prompt 结果不确定时禁止自动重投，
 并升级要求核对 `nudge status/reconcile`。这个守卫只推动负责人作出决定，绝不自动 accept/return、改变 owner/status

@@ -370,11 +370,11 @@ func addManagerQueuePatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnaps
 		if statusErr != nil || (status != "idle" && status != "done") {
 			continue
 		}
-		oldest, err := parseOperationsTime("manager queue oldest_at", backlog.OldestAt)
+		selectedAt, err := parseOperationsTime("manager queue selected_at", backlog.SelectedAt)
 		if err != nil {
 			return err
 		}
-		if now.Sub(oldest) < stallAfter {
+		if now.Sub(selectedAt) < stallAfter {
 			continue
 		}
 		item := backlog.Items[0]
@@ -389,7 +389,7 @@ func addManagerQueuePatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnaps
 		addPatrolFinding(analysis, PatrolFinding{
 			Category: "stalled", ObjectID: "manager-queue:" + backlog.Manager, Agent: backlog.Manager,
 			SignalType: "idle_with_actionable_queue", Signals: signals,
-			Message: fmt.Sprintf("manager status=%s 但仍有 %d 项 durable 待办；最旧 case=%s status=%s basis=%s；纠正：%s", status, len(backlog.Items), item.CaseID, item.Status, backlog.BasisEventID, managerQueueAction(item)),
+			Message: fmt.Sprintf("manager status=%s 但仍有 %d 项 durable 待办；当前最高优先级 case=%s status=%s basis=%s；纠正：%s", status, len(backlog.Items), item.CaseID, item.Status, backlog.BasisEventID, managerQueueAction(item)),
 		})
 	}
 	analysis.report.Warnings = len(analysis.report.Findings)

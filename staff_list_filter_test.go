@@ -4,24 +4,34 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestStaffListFiltersExactDirectReportsWithoutRuntime(t *testing.T) {
+	e := setupTestEnv(t)
 	cfg := testConfig()
 	for index := range cfg.Agents {
 		if cfg.Agents[index].Name == "eng-data-engineer" {
 			cfg.Agents[index].Disabled = true
+			finalizeTestSeatMutation(&cfg.Agents[index])
 		}
 	}
+	writeConfigFixture(t, e.config, cfg)
 
 	var textOut bytes.Buffer
-	app := &App{Config: cfg, Out: &textOut, Err: &textOut}
+	app := e.app(t)
+	app.Out, app.Err = &textOut, &textOut
 	if err := app.cmdStaffList([]string{"--reports-to", "zantianyou"}); err != nil {
 		t.Fatal(err)
 	}
 	text := textOut.String()
+	for _, column := range []string{"ACTIVE_WIP", "MAX_WIP", "AVAILABLE_WIP"} {
+		if !strings.Contains(text, column) {
+			t.Fatalf("staff list omitted unambiguous live-capacity column %s:\n%s", column, text)
+		}
+	}
 	if !strings.Contains(text, "eng-developer") {
 		t.Fatalf("filtered staff list omitted active direct report:\n%s", text)
 	}
@@ -32,16 +42,62 @@ func TestStaffListFiltersExactDirectReportsWithoutRuntime(t *testing.T) {
 	}
 
 	var jsonOut bytes.Buffer
-	app = &App{Config: cfg, JSON: true, Out: &jsonOut, Err: &jsonOut}
+	app = e.app(t)
+	app.JSON, app.Out, app.Err = true, &jsonOut, &jsonOut
 	if err := app.cmdStaffList([]string{"--reports-to=zantianyou", "--all"}); err != nil {
 		t.Fatal(err)
 	}
-	var got []AgentRule
+	var got []staffCapacityView
 	if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
 		t.Fatalf("decode filtered JSON: %v\n%s", err, jsonOut.String())
 	}
 	if len(got) != 2 || got[0].Name != "eng-data-engineer" || !got[0].Disabled || got[1].Name != "eng-developer" {
 		t.Fatalf("--reports-to/--all returned wrong stable selection: %+v", got)
+	}
+	if got[1].ActiveWIP != 0 || got[1].MaxWIP != 1 || got[1].AvailableWIP != 1 {
+		t.Fatalf("idle seat capacity is misleading: %+v", got[1])
+	}
+}
+
+func TestStaffListAndGetExposeLiveAssignmentCapacity(t *testing.T) {
+	e := setupTestEnv(t)
+	source := writeTestFile(t, filepath.Join(e.root, "engineering", "staff-capacity-source.md"), "# staff capacity\n")
+	e.setActor(t, "zantianyou", "staff:manager", filepath.Join(e.root, "engineering"))
+	runTestCommand(t, e, "case", "create", "--id", "STAFF-CAPACITY", "--title", "Live capacity", "--source", source)
+	runTestCommand(t, e, "issue", "--case", "STAFF-CAPACITY", "--to", "eng-developer", "--next", "Hold this active assignment")
+
+	var listOut bytes.Buffer
+	app := e.app(t)
+	app.JSON, app.Out, app.Err = true, &listOut, &listOut
+	if err := app.cmdStaffList([]string{"--reports-to", "zantianyou"}); err != nil {
+		t.Fatal(err)
+	}
+	var staff []staffCapacityView
+	if err := json.Unmarshal(listOut.Bytes(), &staff); err != nil {
+		t.Fatal(err)
+	}
+	var developer staffCapacityView
+	for _, view := range staff {
+		if view.Name == "eng-developer" {
+			developer = view
+		}
+	}
+	if developer.Name == "" || developer.ActiveWIP != 1 || developer.MaxWIP != 1 || developer.AvailableWIP != 0 {
+		t.Fatalf("active assignment was not reflected in staff list: %+v", developer)
+	}
+
+	var getOut bytes.Buffer
+	app = e.app(t)
+	app.JSON, app.Out, app.Err = true, &getOut, &getOut
+	if err := app.cmdStaffGet([]string{"--name", "eng-developer"}); err != nil {
+		t.Fatal(err)
+	}
+	var got staffCapacityView
+	if err := json.Unmarshal(getOut.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ActiveWIP != 1 || got.MaxWIP != 1 || got.AvailableWIP != 0 {
+		t.Fatalf("staff get disagrees with live capacity: %+v", got)
 	}
 }
 

@@ -570,7 +570,8 @@ gemini/grok/kimi/opencode/qwen 补齐该 kind 的必需自动授权 argv。未�
 
 gateway 的 manager queue watchdog 将 ledger 的 assignment/case 投影与 Herdr live binding 联合判断。它把
 submission review、经理自己的 active assignment、以及无 active assignment 的经理持有 open case 视为 actionable
-队列；只在精确目标为 idle/done 且最老 status event 超时后工作。每个 `manager + oldest status event + stage`
+队列，并固定按 `review > work > owned_case` 排序、只在同类内按时间 FIFO。只在精确目标为 idle/done 且当前
+最高优先级 status event 超时后工作。每个 `manager + selected status event + stage`
 形成 nudge dedupe key，提醒次数有界且跨重启恢复。额度耗尽后，守卫沿 `reports_to` 向上生成一次 durable escalation。
 若 Prompt 已尝试但结果不确定，则冻结该 nudge、禁止重投，并升级要求人工 reconcile。守卫不能代替 reviewer 执行
 accept/return，也不能改变业务状态；`patrol` 只额外报告 `stalled` finding。

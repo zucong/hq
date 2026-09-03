@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -74,9 +75,12 @@ func canonicalTestTempDir(t *testing.T) string {
 type fakeIdentityProvider struct {
 	actors map[string]Actor
 	calls  int
+	mu     sync.Mutex
 }
 
 func (f *fakeIdentityProvider) Resolve(_ Config, _ string, paneID string) (Actor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	actor, ok := f.actors[paneID]
 	if !ok {

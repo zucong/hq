@@ -35,6 +35,21 @@ func (a *App) staffConfigWriteOptions() configWriteOptions {
 	return a.registryConfigWriteOptions("员工编制")
 }
 
+type staffCapacityView struct {
+	AgentRule
+	ActiveWIP    int `json:"active_wip"`
+	AvailableWIP int `json:"available_wip"`
+}
+
+func staffCapacity(rule AgentRule, ledger *ledgerState) staffCapacityView {
+	active := ledger.assignmentCapacityUsed(rule.Name)
+	available := rule.MaxWIP - active
+	if available < 0 {
+		available = 0
+	}
+	return staffCapacityView{AgentRule: rule, ActiveWIP: active, AvailableWIP: available}
+}
+
 func (a *App) cmdStaff(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("用法：hq staff list|get|add|update|remove")
@@ -81,16 +96,25 @@ func (a *App) cmdStaffList(args []string) error {
 		}
 		selected = append(selected, rule)
 	}
-	if a.JSON {
-		return a.output(selected, "")
+	ledger, err := a.strictLedgerStateReadOnly()
+	if err != nil {
+		return fmt.Errorf("staff list 无法严格重放 ledger 以计算实时 WIP：%w", err)
 	}
-	fmt.Fprintf(a.Out, "%-24s %-24s %-14s %-14s %-3s %-18s %s\n", "SLUG", "ROLE", "DEPARTMENT", "ACTIVATION", "WIP", "REPORTS_TO", "SENDER")
+	views := make([]staffCapacityView, 0, len(selected))
 	for _, rule := range selected {
+		views = append(views, staffCapacity(rule, ledger))
+	}
+	if a.JSON {
+		return a.output(views, "")
+	}
+	fmt.Fprintf(a.Out, "%-24s %-24s %-14s %-14s %-10s %-7s %-13s %-18s %s\n", "SLUG", "ROLE", "DEPARTMENT", "ACTIVATION", "ACTIVE_WIP", "MAX_WIP", "AVAILABLE_WIP", "REPORTS_TO", "SENDER")
+	for _, view := range views {
+		rule := view.AgentRule
 		status := ""
 		if rule.Disabled {
 			status = " [disabled]"
 		}
-		fmt.Fprintf(a.Out, "%-24s %-24s %-14s %-14s %-3d %-18s %s%s\n", rule.Name, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.ActivationPolicy, rule.MaxWIP, rule.ReportsTo, rule.Label, status)
+		fmt.Fprintf(a.Out, "%-24s %-24s %-14s %-14s %-10d %-7d %-13d %-18s %s%s\n", rule.Name, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.ActivationPolicy, view.ActiveWIP, rule.MaxWIP, view.AvailableWIP, rule.ReportsTo, rule.Label, status)
 	}
 	return nil
 }
@@ -106,8 +130,13 @@ func (a *App) cmdStaffGet(args []string) error {
 	if !ok {
 		return fmt.Errorf("员工未登记：%s", *name)
 	}
+	ledger, err := a.strictLedgerStateReadOnly()
+	if err != nil {
+		return fmt.Errorf("staff get 无法严格重放 ledger 以计算实时 WIP：%w", err)
+	}
+	view := staffCapacity(rule, ledger)
 	keepWarm, _ := effectiveSeatKeepWarm(rule)
-	return a.output(rule, fmt.Sprintf("%s：sender=[%s] role=%s department=%s workstation=%s activation=%s keep_warm=%s max_wip=%d kind=%s reports_to=%s disabled=%t", rule.Name, rule.Label, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.WorkstationPath, rule.ActivationPolicy, keepWarm, rule.MaxWIP, rule.Kind, rule.ReportsTo, rule.Disabled))
+	return a.output(view, fmt.Sprintf("%s：sender=[%s] role=%s department=%s workstation=%s activation=%s keep_warm=%s active_wip=%d max_wip=%d available_wip=%d kind=%s reports_to=%s disabled=%t", rule.Name, rule.Label, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.WorkstationPath, rule.ActivationPolicy, keepWarm, view.ActiveWIP, rule.MaxWIP, view.AvailableWIP, rule.Kind, rule.ReportsTo, rule.Disabled))
 }
 
 func (a *App) staffMutationActor() (Actor, error) {

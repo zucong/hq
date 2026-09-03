@@ -490,7 +490,7 @@ func (a *App) cmdAssignmentList(args []string) error {
 		cleanStatus != "rework" && cleanStatus != "completed" && cleanStatus != "reported" && cleanStatus != "returned" {
 		return fmt.Errorf("--status 只能是 issued/accepted/submitted/rework/completed/reported/returned")
 	}
-	ledger, err := a.assignmentLedgerState()
+	ledger, err := a.strictLedgerStateReadOnly()
 	if err != nil {
 		return err
 	}
@@ -531,7 +531,7 @@ func (a *App) cmdAssignmentShow(args []string) error {
 	if err := validateLedgerID("assignment_id", cleanID); err != nil {
 		return err
 	}
-	ledger, err := a.assignmentLedgerState()
+	ledger, err := a.strictLedgerStateReadOnly()
 	if err != nil {
 		return err
 	}
@@ -546,7 +546,7 @@ func (a *App) cmdAssignmentShow(args []string) error {
 	return fmt.Errorf("assignment 不存在：%s", cleanID)
 }
 
-func (a *App) assignmentLedgerState() (*ledgerState, error) {
+func (a *App) strictLedgerStateReadOnly() (*ledgerState, error) {
 	if store, ok := a.Store.(interface {
 		LedgerStateReadOnly(Config) (*ledgerState, error)
 	}); ok {

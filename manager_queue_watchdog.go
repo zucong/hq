@@ -26,11 +26,16 @@ type ManagerQueueItem struct {
 type ManagerQueueBacklog struct {
 	Manager      string             `json:"manager"`
 	BasisEventID string             `json:"basis_event_id"`
-	OldestAt     string             `json:"oldest_at"`
+	SelectedAt   string             `json:"selected_at"`
 	Items        []ManagerQueueItem `json:"items"`
 }
 
 func managerQueueItemLess(left, right ManagerQueueItem) bool {
+	leftPriority := managerQueueKindPriority(left.Kind)
+	rightPriority := managerQueueKindPriority(right.Kind)
+	if leftPriority != rightPriority {
+		return leftPriority < rightPriority
+	}
 	if left.StatusUpdatedAt == right.StatusUpdatedAt {
 		if left.CaseID == right.CaseID {
 			return left.AssignmentID < right.AssignmentID
@@ -38,6 +43,19 @@ func managerQueueItemLess(left, right ManagerQueueItem) bool {
 		return left.CaseID < right.CaseID
 	}
 	return left.StatusUpdatedAt < right.StatusUpdatedAt
+}
+
+func managerQueueKindPriority(kind string) int {
+	switch kind {
+	case "review":
+		return 0
+	case "work":
+		return 1
+	case "owned_case":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, error) {
@@ -116,7 +134,7 @@ func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, e
 		items := byManager[manager]
 		sort.Slice(items, func(i, j int) bool { return managerQueueItemLess(items[i], items[j]) })
 		backlogs = append(backlogs, ManagerQueueBacklog{
-			Manager: manager, BasisEventID: items[0].StatusEventID, OldestAt: items[0].StatusUpdatedAt, Items: items,
+			Manager: manager, BasisEventID: items[0].StatusEventID, SelectedAt: items[0].StatusUpdatedAt, Items: items,
 		})
 	}
 	return backlogs, nil
@@ -296,14 +314,14 @@ func (a *App) runManagerQueueWatchdogOnce(ctx context.Context) error {
 		if statusErr != nil || (status != "idle" && status != "done") {
 			continue
 		}
-		oldest, parseErr := parseOperationsTime("manager queue oldest_at", backlog.OldestAt)
+		selectedAt, parseErr := parseOperationsTime("manager queue selected_at", backlog.SelectedAt)
 		if parseErr != nil {
 			return parseErr
 		}
-		if now.Sub(oldest) < stallAfter {
+		if now.Sub(selectedAt) < stallAfter {
 			continue
 		}
-		lastAt := oldest
+		lastAt := selectedAt
 		completedNudges := 0
 		active := false
 		var uncertainNudge *nudgeLedgerRecord

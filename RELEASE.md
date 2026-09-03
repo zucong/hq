@@ -61,7 +61,10 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
     ambiguous 必须冻结为 activation unknown，trust/safeguard 页面不得收到 Prompt，accept 后必须停止重投。
 13. 模拟下属 report 已 submitted、经理回合已结束：manager queue watchdog 必须在超时后发送带精确
     accept/return 命令的 durable nudge，次数耗尽后沿 reports_to 升级；重复扫描不得重复 Prompt，ambiguous
-    必须冻结并要求 reconcile，且整个过程不得替经理验收或改变业务状态。
+    必须冻结并要求 reconcile，且整个过程不得替经理验收或改变业务状态；混合队列必须保持
+    `review > work > owned_case`，旧 open case 不得遮蔽待审或返工。
+14. `staff list/get` 必须分别显示 ledger 实时 `active_wip`、registry 上限 `max_wip` 与实时
+    `available_wip`；禁止再用无定义的 `WIP` 列让 Agent 把容量上限误当当前占用。
 
 公司实例不依赖源码目录或全局 `hq`，但运行环境必须单独提供 `herdr` 与 registry 所选
 Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册、成立决策和发布 checksum 的审计记录。

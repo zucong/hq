@@ -252,8 +252,9 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 		fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq --direct runtime reap --agent <direct-report-seat> --retry-unknown")
 		fmt.Fprintln(&b, "```")
 		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "`staff list` 的 `ACTIVE_WIP` 是 ledger 中尚未收敛的实时占用，`MAX_WIP` 是 seat 容量上限，`AVAILABLE_WIP` 才是当前可派容量；`MAX_WIP=1` 不表示已有一项任务。")
 		fmt.Fprintln(&b, "`issue` 会建立 durable Assignment Contract，并在 durable issue intent/prepared 时立即预占目标 WIP，防止并发超卖；员工后续 `accept` 是确认接单，不是容量开始计数的时点。目标为 `on_assignment` 且当前休眠时，HQ 会通过 Herdr 自动 cold-resume 并递送门铃；经理不需要、也不得另发 `herdr prompt` 或执行 `hq up <on_assignment-seat>`。这里禁止的是业务派工/激活绕行，不禁止人类所有者或其明确授权代理在 seat 已由 HQ 激活后，以 Herdr prompt 补充精确外部工具权限；该提示必须继续原 assignment，不能改变任何业务合同。员工交付被验收后，无未决工作的 runtime 可在有界 keep-warm 后自动休眠；seat、角色卡和工位仍在。若 issue 因 `hibernate_attempting`/`hibernate_unknown` 被拒绝，在任何 origin/WIP 写入前就已终止；使用上面的 status 确认同一 incarnation，再严格按报错指示单 seat retry，不得用裸 prompt 绕过。跨部门修复完成后的 message 只传上下文；对原 case 先 revise 到新版本再 fresh issue，不能要求旧 assignment 再次 report。")
-		fmt.Fprintln(&b, "\n经理不能以结束 Agent 回合代替队列收敛。gateway 会在你处于 idle/done 且 durable submission、active assignment 或新建但尚未委派的 owned open case 超时时发送 `HQ守卫` nudge；accepted、blocked、escalated 等 case 不会仅因 owner 仍是你而触发。相同队列 basis 只做有界提醒，随后沿 registry `reports_to` 升级。收到后必须执行其中的 accept/return/report/case 命令；系统本身绝不代做验收。")
+		fmt.Fprintln(&b, "\n经理不能以结束 Agent 回合代替队列收敛。gateway 会在你处于 idle/done 且 durable submission、active assignment 或新建但尚未委派的 owned open case 超时时发送 `HQ守卫` nudge；accepted、blocked、escalated 等 case 不会仅因 owner 仍是你而触发。队列固定按待审 submission、经理本人 active/rework assignment、未委派 owned open case 排序，并只在同类内 FIFO；旧 open case 不会遮蔽验收或返工。相同队列 basis 只做有界提醒，随后沿 registry `reports_to` 升级。收到后必须执行其中的 accept/return/report/case 命令；系统本身绝不代做验收。")
 	} else if rule.hasResponsibility(roleApprovalWitness) {
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, "## 总裁秘书与人类所有者沟通协议（强制）")
