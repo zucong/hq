@@ -198,7 +198,9 @@ Config
 │   ├── default_mode
 │   ├── max_consecutive_wakes
 │   ├── max_bundle_items
-│   └── max_bundle_bytes
+│   ├── max_bundle_bytes
+│   ├── assignment_accept_timeout
+│   └── max_activation_redeliveries
 ├── runtime_fallback
 │   ├── auto / trigger
 │   ├── from_kind / to_kind
@@ -534,6 +536,15 @@ prefix。sent 或 resolved-delivered 会在一个 journal batch 中生成所选 
 依据持久化的真实 base/envelopes 重算 item bytes、prompt digest 与 manifest digest。默认上限为 8 条/16 KiB；
 2 KiB 仍限制单条用户 `message --text`。这是 HQ ledger 内的 exactly-once context consumption，不是外部
 Herdr Prompt 的 transport exactly-once；ambiguous 结果仍必须人工核对。
+
+issue 的 transport `sent` 与员工 activation 分层记账。`issue_sent` 创建唯一 Assignment Contract；若超时仍为
+`issued`，gateway watcher 只在同一冻结 seat/session/incarnation 精确在线、Herdr status 为 idle/done 且终端证据为
+正常输入页时，重放 origin 的原始 payload。重放使用同一 delivery/assignment，不推进 case、不预占第二份 WIP，
+并以 `assignment_activation_attempted → sent|failed_pre_send|unknown` 记录外部副作用边界。attempted 崩溃残留
+保守转 unknown；unknown 禁止自动重投并复用 `delivery resolve`，有界额度耗尽后写 exhausted，显式
+`delivery retry` 可在经理再次核验后恢复。员工 durable `accept` 是唯一 activation acknowledgement，之后 watcher
+不再重放。Codex 的 hook-trust/content-safeguard 页面不满足安全输入证据，因此不会接收重投。
+
 `delivery consume` 与 accept-time context render 会在 ledger flock 内选择、输出并提交 claim，从而拒绝并发
 bundle/consume 抢占；但 stdout/调用方输出不是 durable transport。若进程在 render 成功后、写入 journal intent
 前崩溃，同一 envelope 可能在恢复后再次暴露。需要一次外部可见性的场景必须在后续增加两阶段 output

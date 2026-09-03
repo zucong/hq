@@ -337,7 +337,7 @@ func (a *App) assessRuntimeSeatLocked(rule AgentRule, reconcile bool, retryFaile
 		return assessment, fmt.Errorf("runtime reap 严格 replay ledger：%w", err)
 	}
 	var terminalAt time.Time
-	var actionAckCommands, actionAckWaits []string
+	var actionAckCommands, actionAckWaits, activationActions []string
 	for _, assignment := range ledger.assignments {
 		if assignment == nil || assignment.Recipient != rule.Name {
 			continue
@@ -346,6 +346,27 @@ func (a *App) assessRuntimeSeatLocked(rule AgentRule, reconcile bool, retryFaile
 		closed := state != nil && state.Status == string(statusClosed)
 		if !assignment.Consumed && !closed {
 			appendRuntimeBlocker(&assessment.view, "active_assignment:%s", assignment.AssignmentID)
+			if assignment.Status == "issued" {
+				for deliveryID, record := range ledger.deliveries {
+					if record.Terminal.ID != assignment.EventID {
+						continue
+					}
+					status := record.ActivationStatus
+					if status == "" {
+						status = "awaiting_accept"
+					}
+					appendRuntimeBlocker(&assessment.view, "assignment_activation_%s:%s", status, deliveryID)
+					switch status {
+					case activationUnknown:
+						activationActions = append(activationActions, fmt.Sprintf("delivery=%s unknown：核对后运行 hq delivery resolve --id %s --outcome delivered|not-delivered --reason TEXT --evidence PATH", deliveryID, deliveryID))
+					case activationExhausted:
+						activationActions = append(activationActions, fmt.Sprintf("delivery=%s exhausted：核验终端后运行 hq delivery retry --id %s", deliveryID, deliveryID))
+					default:
+						activationActions = append(activationActions, fmt.Sprintf("delivery=%s：HQ 正在等待 accept，并仅会在安全 idle 终端上有界重投同一 assignment", deliveryID))
+					}
+					break
+				}
+			}
 			continue
 		}
 		if assignment.Consumed {
@@ -406,7 +427,10 @@ func (a *App) assessRuntimeSeatLocked(rule AgentRule, reconcile bool, retryFaile
 			appendRuntimeBlocker(&assessment.view, "owned_open_case:%s:%s", caseID, state.Status)
 		}
 	}
-	if assessment.view.NextAction == "" && len(actionAckCommands) != 0 {
+	if assessment.view.NextAction == "" && len(activationActions) != 0 {
+		sort.Strings(activationActions)
+		assessment.view.NextAction = "assignment 尚未激活：" + strings.Join(activationActions, "；") + "；不要新建 assignment"
+	} else if assessment.view.NextAction == "" && len(actionAckCommands) != 0 {
 		sort.Strings(actionAckCommands)
 		assessment.view.NextAction = "当前 seat 是行动型 message 接收方；逐条确认已读后执行：" + strings.Join(actionAckCommands, "；")
 	} else if assessment.view.NextAction == "" && len(actionAckWaits) != 0 {
@@ -788,6 +812,9 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 	}
 	if fallbackErr := child.recoverContentSafeguardsOnce(ctx); fallbackErr != nil {
 		fmt.Fprintf(a.Err, "[HQ runtime fallback] %v\n", fallbackErr)
+	}
+	if activationErr := child.recoverIssuedAssignmentActivationsOnce(ctx); activationErr != nil {
+		fmt.Fprintf(a.Err, "[HQ assignment activation] %v\n", activationErr)
 	}
 	report, reapErr := child.reapRuntimeSeats("", false, false)
 	for _, view := range report.Seats {

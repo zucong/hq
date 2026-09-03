@@ -309,6 +309,8 @@ delivery_policy:
   max_consecutive_wakes: 3
   max_bundle_items: 8
   max_bundle_bytes: 16384
+  assignment_accept_timeout: 2m
+  max_activation_redeliveries: 2
 ```
 
 主要约束：
@@ -526,6 +528,15 @@ assignment/case、正式投递、行动型消息确认或 reminder/nudge 时自�
 `hq staff list --reports-to <manager-agent-slug>` 只读精确筛选 registry 中的直属 seat，默认排除已停用 seat；
 只在组织治理或审计时才同时传入 `--all`。
 
+`issue_sent` 只证明 Herdr 已接受门铃注入，不证明员工看见任务或执行了 `accept`。gateway 的 assignment
+activation watchdog 会在 `assignment_accept_timeout` 后核对原 assignment 仍为 `issued`、冻结 seat 精确在线、
+runtime 为安全 `idle|done`，并且 Codex 终端确实处于正常输入页；满足条件时，它复用完全相同的 delivery ID、
+assignment event 和原始 payload 有界重投，最多 `max_activation_redeliveries` 次。重复出现的同一
+`[HQ notification]` 是激活重投，不是新任务；员工查询原 assignment 后只 accept 原 event。
+任何 Herdr 歧义都会写成 `activation_unknown` 并停止自动重投；额度耗尽写成 `activation_exhausted`。
+经理或 `can_manage_staff` 角色先运行 `hq delivery status --id ...`；unknown 用原 `delivery resolve` 核对，
+确认未送达或 exhausted 时用原 `delivery retry`。不得创建第二个 case/assignment，也不得用裸 prompt 补派。
+
 跨部门返工不是对旧 `accepted` report 执行 `return`，也不是一条 `message --kind handoff`。前者会倒转
 审计终态，后者不会改变 durable owner。当前持有父 case 的部门经理使用 `case escalate`；HQ 在一个原子
 事务中创建新子 case 并记录 `case_escalation_prepared`，送达后新子 case 进入 `escalated`、owner 固定为
@@ -676,6 +687,10 @@ context。并发 wake attempt 因此只能得到互不重叠的 manifest。trans
 只能前滚完整 batch。`failed_pre_send` / `not-delivered` 释放预留且不 claim；`unknown` 保留预留，等待人工核验。
 strict replay 会从持久化的真实 base payload 与 envelopes 重算每项 bytes、FIFO/overflow、最终 prompt digest
 和 manifest digest。以上保证的是 HQ ledger 内的选取与收敛，不把外部 Herdr Prompt 冒充为 transport exactly-once。
+
+对 issue，`delivery status` 还会显示独立的 `activation_status` 与 `activation_attempt_count`。主状态 `sent`
+仅表示注入成功；assignment 只有出现 durable `accept` 才算真正激活。`delivery retry/resolve` 会根据主投递状态
+自动处理 failed/unknown 主投递或 issued assignment 的激活状态，不需要另一套子命令。
 
 ```bash
 ./bin/hq reconcile

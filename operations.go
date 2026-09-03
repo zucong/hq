@@ -68,10 +68,13 @@ func isNudgeEvent(eventType string) bool {
 }
 
 func isInfrastructureEvent(eventType string) bool {
-	return isNudgeEvent(eventType) || isEstopEvent(eventType)
+	return isNudgeEvent(eventType) || isEstopEvent(eventType) || isAssignmentActivationEvent(eventType)
 }
 
 func validateInfrastructureEventFields(event Event) error {
+	if isAssignmentActivationEvent(event.Type) {
+		return validateAssignmentActivationRequiredFields(event)
+	}
 	require := func(fields ...struct{ name, value string }) error { return requireEventFields(event, fields...) }
 	switch event.Type {
 	case "nudge_enqueued":

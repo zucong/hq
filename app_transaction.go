@@ -741,6 +741,15 @@ func (a *App) reconcileDeliveries() error {
 	}
 	var failures []string
 	for _, view := range views {
+		// Terminal deliveries are already converged. Re-reading and strictly
+		// replaying the complete ledger once per historical delivery makes
+		// gateway startup quadratic and can exceed hq up's handshake deadline
+		// for a healthy, long-lived company. Only states with actual recovery
+		// work enter the per-delivery lock and freshness read.
+		if view.Status != deliveryPrepared && view.Status != deliveryAttempted &&
+			!(view.Status == deliveryQueued && view.DeliveryMode == deliveryModeQuiet) {
+			continue
+		}
 		if reconcileErr := func() error {
 			releaseOperation, lockErr := a.lockOperation(operationScopeDelivery, view.DeliveryID)
 			if lockErr != nil {

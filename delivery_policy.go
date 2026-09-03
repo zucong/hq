@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -20,13 +21,15 @@ const (
 	deliveryTargetNextTurn = "next-turn"
 	deliveryTargetNextStep = "next-step"
 
-	defaultDeliveryBundleItems = 8
-	defaultDeliveryBundleBytes = 16 * 1024
-	maxDeliveryBundleItems     = 100
-	maxDeliveryBundleBytes     = 1024 * 1024
-	maxTurnBundleBaseBytes     = 64 * 1024
-	maxTurnBundleEnvelopeBytes = 8 * 1024
-	turnBundleVersion          = 1
+	defaultDeliveryBundleItems       = 8
+	defaultDeliveryBundleBytes       = 16 * 1024
+	defaultAssignmentAcceptTimeout   = 2 * time.Minute
+	defaultMaxActivationRedeliveries = 2
+	maxDeliveryBundleItems           = 100
+	maxDeliveryBundleBytes           = 1024 * 1024
+	maxTurnBundleBaseBytes           = 64 * 1024
+	maxTurnBundleEnvelopeBytes       = 8 * 1024
+	turnBundleVersion                = 1
 )
 
 type deliveryRuntimeState string
@@ -142,7 +145,9 @@ func validateDeliveryPrimitives(event Event) error {
 func (c Config) effectiveDeliveryPolicy() DeliveryPolicy {
 	if c.DeliveryPolicy == nil {
 		return DeliveryPolicy{DefaultMode: deliveryModeWakeup, MaxConsecutiveWakes: 3,
-			MaxBundleItems: defaultDeliveryBundleItems, MaxBundleBytes: defaultDeliveryBundleBytes}
+			MaxBundleItems: defaultDeliveryBundleItems, MaxBundleBytes: defaultDeliveryBundleBytes,
+			AssignmentAcceptTimeout:   defaultAssignmentAcceptTimeout.String(),
+			MaxActivationRedeliveries: defaultMaxActivationRedeliveries}
 	}
 	policy := *c.DeliveryPolicy
 	if policy.MaxBundleItems == 0 {
@@ -151,7 +156,21 @@ func (c Config) effectiveDeliveryPolicy() DeliveryPolicy {
 	if policy.MaxBundleBytes == 0 {
 		policy.MaxBundleBytes = defaultDeliveryBundleBytes
 	}
+	if strings.TrimSpace(policy.AssignmentAcceptTimeout) == "" {
+		policy.AssignmentAcceptTimeout = defaultAssignmentAcceptTimeout.String()
+	}
+	if policy.MaxActivationRedeliveries == 0 {
+		policy.MaxActivationRedeliveries = defaultMaxActivationRedeliveries
+	}
 	return policy
+}
+
+func (c Config) assignmentAcceptTimeout() time.Duration {
+	duration, err := time.ParseDuration(c.effectiveDeliveryPolicy().AssignmentAcceptTimeout)
+	if err != nil {
+		return defaultAssignmentAcceptTimeout
+	}
+	return duration
 }
 
 func messageNeedsAction(kind string) bool {

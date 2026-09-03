@@ -133,3 +133,7 @@ agents:
 delivery_policy:
     default_mode: auto
     max_consecutive_wakes: 3
+    max_bundle_items: 8
+    max_bundle_bytes: 16384
+    assignment_accept_timeout: 2m
+    max_activation_redeliveries: 2

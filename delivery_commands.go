@@ -56,7 +56,9 @@ func (a *App) cmdDeliveryStatus(args []string) error {
 	if !ok {
 		return fmt.Errorf("delivery 不存在：%s", *id)
 	}
-	return a.output(view, fmt.Sprintf("delivery=%s status=%s：%s；下一步：%s（internal=%s attempts=%d）", view.DeliveryID, view.ProjectionStatus, view.StatusDescription, view.NextAction, view.Status, view.AttemptCount))
+	return a.output(view, fmt.Sprintf("delivery=%s status=%s：%s；下一步：%s（internal=%s attempts=%d activation=%s activation_attempts=%d）",
+		view.DeliveryID, view.ProjectionStatus, view.StatusDescription, view.NextAction, view.Status, view.AttemptCount,
+		view.ActivationStatus, view.ActivationAttemptCount))
 }
 
 func (a *App) cmdDeliveryRetry(args []string) error {
@@ -82,8 +84,39 @@ func (a *App) cmdDeliveryRetry(args []string) error {
 	if !ok {
 		return fmt.Errorf("delivery 不存在：%s", deliveryID)
 	}
+	if view.Status == deliverySent && view.OriginType == "issue_prepared" {
+		if actor.Name != "" && view.ActivationStatus == activationUnknown {
+			return fmt.Errorf("delivery %s 的主投递已 sent，但 assignment activation 为 unknown；禁止 retry。先由 can_manage_staff 核对终端，再运行 hq delivery resolve --id %s --outcome delivered|not-delivered --reason TEXT --evidence PATH", deliveryID, deliveryID)
+		}
+		events, readErr := a.Store.ReadAll(a.Config)
+		if readErr != nil {
+			return readErr
+		}
+		origin, originOK := findEvent(events, view.OriginEventID)
+		if !originOK {
+			return fmt.Errorf("delivery origin 不存在：%s", view.OriginEventID)
+		}
+		if actor.Name != origin.Actor && !actor.Rule.CanManageStaff {
+			return permissionf("仅 assignment issuer 或 can_manage_staff 可重新激活员工")
+		}
+		before := view.ActivationAttemptCount
+		if err := a.activateIssuedAssignmentOnce(a.requestContext(), deliveryID, true, actor); err != nil {
+			return err
+		}
+		fresh, exists, readErr := a.Store.Delivery(a.Config, deliveryID)
+		if readErr != nil {
+			return readErr
+		}
+		if !exists {
+			return fmt.Errorf("delivery 在 activation retry 后消失：%s", deliveryID)
+		}
+		if fresh.ActivationAttemptCount == before {
+			return fmt.Errorf("delivery %s 未重投：员工必须仍为 issued，且同一冻结席位须精确在线、status=idle|done、interactive_ready=true；Codex 终端还必须显示正常 ‘Ask Codex to do anything’ 输入提示且不得停在 hook trust/content safeguard 页面。先运行 hq assignment show --id ASSIGNMENT_ID 与 hq --direct runtime status --agent %s 修复，再复用本命令；不要新建 assignment", deliveryID, view.Target)
+		}
+		return a.output(fresh, fmt.Sprintf("delivery=%s 已复用原 assignment/payload 完成激活重投；activation=%s attempts=%d", deliveryID, fresh.ActivationStatus, fresh.ActivationAttemptCount))
+	}
 	if view.Status != deliveryFailedPreSend {
-		return fmt.Errorf("delivery %s 当前为 %s，仅 failed_pre_send 可显式 retry", deliveryID, view.Status)
+		return fmt.Errorf("delivery %s 当前为 %s，仅主投递 failed_pre_send，或仍为 issued 的 sent issue 可显式 retry；先运行 hq delivery status --id %s", deliveryID, view.Status, deliveryID)
 	}
 	events, err := a.Store.ReadAll(a.Config)
 	if err != nil {
@@ -156,6 +189,37 @@ func (a *App) cmdDeliveryResolve(args []string) error {
 	}
 	if !ok {
 		return fmt.Errorf("delivery 不存在：%s", deliveryID)
+	}
+	if view.Status == deliverySent && view.OriginType == "issue_prepared" && view.ActivationStatus == activationUnknown {
+		attemptEventID := view.ActivationAttemptEventID
+		commandID := stableCommandID("assignment-activation-resolve", deliveryID, attemptEventID)
+		digest := requestDigest("assignment-activation-resolve", actor.Name, deliveryID, attemptEventID, *outcome, cleanReason, cleanEvidence)
+		result, err := a.Store.Transact(a.Config, commandID, digest, a.DryRun, func(ledger *ledgerState) (Event, error) {
+			record := ledger.deliveries[deliveryID]
+			if record == nil || record.ActivationStatus != activationUnknown || record.ActivationAttempt.ID != attemptEventID {
+				return Event{}, conflictf("delivery %s activation unknown 已变化；请重新运行 delivery status", deliveryID)
+			}
+			assignment := ledger.assignments[record.Terminal.ID]
+			if assignment == nil {
+				return Event{}, fmt.Errorf("delivery %s 缺少 assignment", deliveryID)
+			}
+			eventType, state := "assignment_activation_resolved_not_sent", activationFailedPreSend
+			if *outcome == "delivered" {
+				eventType, state = "assignment_activation_resolved_sent", activationSent
+			}
+			event, err := a.newOperationsEvent(actor, eventType, record.Origin.CaseID)
+			if err != nil {
+				return Event{}, err
+			}
+			populateAssignmentActivationEvent(&event, record, assignment)
+			event.AttemptEventID, event.Delivery = attemptEventID, state
+			event.Note, event.ResolutionRef = cleanReason, cleanEvidence
+			return event, nil
+		})
+		if err != nil {
+			return err
+		}
+		return a.output(result.Event, fmt.Sprintf("delivery=%s assignment activation 已人工 resolve 为 %s；若为 not-delivered，可继续运行 hq delivery retry --id %s", deliveryID, result.Event.Delivery, deliveryID))
 	}
 	if view.AttemptEventID == "" {
 		return fmt.Errorf("delivery %s 没有可核对的 attempted 事件", deliveryID)

@@ -23,26 +23,30 @@ func normalizeAssignmentDue(value string) (string, error) {
 }
 
 type AssignmentView struct {
-	AssignmentID        string `json:"assignment_id"`
-	AssignmentEventID   string `json:"assignment_event_id"`
-	AssignmentDigest    string `json:"assignment_digest,omitempty"`
-	ContractVersion     int    `json:"contract_version"`
-	AssigneeSeatVersion int    `json:"assignee_seat_version,omitempty"`
-	AssigneeSeatDigest  string `json:"assignee_seat_digest,omitempty"`
-	RoleCardID          string `json:"role_card_id,omitempty"`
-	RoleCardVersion     int    `json:"role_card_version,omitempty"`
-	RoleCardDigest      string `json:"role_card_digest,omitempty"`
-	RoleCardManualPath  string `json:"role_card_manual_path,omitempty"`
-	CaseID              string `json:"case_id"`
-	CaseVersion         int    `json:"case_version"`
-	CaseDigest          string `json:"case_digest,omitempty"`
-	Project             string `json:"project,omitempty"`
-	Issuer              string `json:"issuer"`
-	Assignee            string `json:"assignee"`
-	Reviewer            string `json:"reviewer"`
-	Acceptor            string `json:"acceptor"`
-	DueAt               string `json:"due_at,omitempty"`
-	Status              string `json:"status"`
+	AssignmentID         string `json:"assignment_id"`
+	AssignmentEventID    string `json:"assignment_event_id"`
+	AssignmentDigest     string `json:"assignment_digest,omitempty"`
+	ContractVersion      int    `json:"contract_version"`
+	AssigneeSeatVersion  int    `json:"assignee_seat_version,omitempty"`
+	AssigneeSeatDigest   string `json:"assignee_seat_digest,omitempty"`
+	RoleCardID           string `json:"role_card_id,omitempty"`
+	RoleCardVersion      int    `json:"role_card_version,omitempty"`
+	RoleCardDigest       string `json:"role_card_digest,omitempty"`
+	RoleCardManualPath   string `json:"role_card_manual_path,omitempty"`
+	CaseID               string `json:"case_id"`
+	CaseVersion          int    `json:"case_version"`
+	CaseDigest           string `json:"case_digest,omitempty"`
+	Project              string `json:"project,omitempty"`
+	Issuer               string `json:"issuer"`
+	Assignee             string `json:"assignee"`
+	Reviewer             string `json:"reviewer"`
+	Acceptor             string `json:"acceptor"`
+	DueAt                string `json:"due_at,omitempty"`
+	Status               string `json:"status"`
+	DeliveryID           string `json:"delivery_id,omitempty"`
+	ActivationStatus     string `json:"activation_status,omitempty"`
+	ActivationAttempts   int    `json:"activation_attempts,omitempty"`
+	ActivationNextAction string `json:"activation_next_action,omitempty"`
 }
 
 // frozenSeatContract is the immutable employee identity captured by an
@@ -412,7 +416,20 @@ func (s *ledgerState) assignmentViews() []AssignmentView {
 	views := make([]AssignmentView, 0, len(s.assignmentList))
 	for _, eventID := range s.assignmentList {
 		if assignment := s.assignments[eventID]; assignment != nil {
-			views = append(views, assignment.view())
+			view := assignment.view()
+			for _, record := range s.deliveries {
+				if record.Terminal.ID != assignment.EventID {
+					continue
+				}
+				view.DeliveryID = record.Origin.DeliveryID
+				view.ActivationStatus = record.ActivationStatus
+				view.ActivationAttempts = record.ActivationAttemptCount
+				if assignment.Status == "issued" {
+					_, view.ActivationNextAction = describeDelivery(record)
+				}
+				break
+			}
+			views = append(views, view)
 		}
 	}
 	sort.Slice(views, func(i, j int) bool {
@@ -492,8 +509,8 @@ func (a *App) cmdAssignmentList(args []string) error {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "HQ assignments：%d", len(filtered))
 	for _, view := range filtered {
-		fmt.Fprintf(&builder, "\n%s case=%s@v%d assignee=%s reviewer=%s acceptor=%s status=%s due=%s",
-			view.AssignmentID, view.CaseID, view.CaseVersion, view.Assignee, view.Reviewer, view.Acceptor, view.Status, view.DueAt)
+		fmt.Fprintf(&builder, "\n%s case=%s@v%d assignee=%s reviewer=%s acceptor=%s status=%s activation=%s due=%s",
+			view.AssignmentID, view.CaseID, view.CaseVersion, view.Assignee, view.Reviewer, view.Acceptor, view.Status, view.ActivationStatus, view.DueAt)
 	}
 	return a.output(filtered, builder.String())
 }
@@ -515,10 +532,10 @@ func (a *App) cmdAssignmentShow(args []string) error {
 	}
 	for _, view := range ledger.assignmentViews() {
 		if view.AssignmentID == cleanID || view.AssignmentEventID == cleanID {
-			return a.output(view, fmt.Sprintf("assignment=%s case=%s@v%d assignee=%s role=%s@%d reviewer=%s acceptor=%s status=%s digest=%s due=%s",
+			return a.output(view, fmt.Sprintf("assignment=%s case=%s@v%d assignee=%s role=%s@%d reviewer=%s acceptor=%s status=%s activation=%s activation_attempts=%d next=%s digest=%s due=%s",
 				view.AssignmentID, view.CaseID, view.CaseVersion, view.Assignee,
 				view.RoleCardID, view.RoleCardVersion, view.Reviewer, view.Acceptor,
-				view.Status, view.AssignmentDigest, view.DueAt))
+				view.Status, view.ActivationStatus, view.ActivationAttempts, view.ActivationNextAction, view.AssignmentDigest, view.DueAt))
 		}
 	}
 	return fmt.Errorf("assignment 不存在：%s", cleanID)

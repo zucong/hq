@@ -22,51 +22,59 @@ const (
 )
 
 type deliveryRecord struct {
-	Origin              Event
-	Status              string
-	Attempt             Event
-	Terminal            Event
-	Ack                 Event
-	AttemptCount        int
-	ContextState        string
-	BundledByAttemptID  string
-	BundledByDeliveryID string
+	Origin                 Event
+	Status                 string
+	Attempt                Event
+	Terminal               Event
+	Ack                    Event
+	AttemptCount           int
+	ContextState           string
+	BundledByAttemptID     string
+	BundledByDeliveryID    string
+	ActivationStatus       string
+	ActivationAttempt      Event
+	ActivationTerminal     Event
+	ActivationAttemptCount int
 }
 
 type DeliveryView struct {
-	DeliveryID               string   `json:"delivery_id"`
-	CaseID                   string   `json:"case_id"`
-	OriginEventID            string   `json:"origin_event_id"`
-	OriginType               string   `json:"origin_type"`
-	Target                   string   `json:"target"`
-	PayloadDigest            string   `json:"payload_digest"`
-	Status                   string   `json:"internal_status"`
-	ProjectionStatus         string   `json:"status"`
-	AttemptEventID           string   `json:"attempt_event_id,omitempty"`
-	TerminalEventID          string   `json:"terminal_event_id,omitempty"`
-	AckedBy                  string   `json:"acked_by,omitempty"`
-	AckEventID               string   `json:"ack_event_id,omitempty"`
-	AttemptCount             int      `json:"attempt_count"`
-	DeliveryMode             string   `json:"delivery_mode"`
-	DeliveryTarget           string   `json:"delivery_target"`
-	Wakeup                   bool     `json:"wakeup"`
-	DecisionReason           string   `json:"decision_reason,omitempty"`
-	ContextState             string   `json:"context_state"`
-	TurnBundleVersion        int      `json:"turn_bundle_version,omitempty"`
-	TurnBundleDigest         string   `json:"turn_bundle_digest,omitempty"`
-	TurnPromptDigest         string   `json:"turn_prompt_digest,omitempty"`
-	TurnBundleDeliveryIDs    []string `json:"turn_bundle_delivery_ids,omitempty"`
-	TurnBundlePayloadDigests []string `json:"turn_bundle_payload_digests,omitempty"`
-	TurnBundleItemBytes      []int    `json:"turn_bundle_item_bytes,omitempty"`
-	TurnBundleBytes          int      `json:"turn_bundle_bytes,omitempty"`
-	TurnBundleOverflow       int      `json:"turn_bundle_overflow,omitempty"`
-	TurnBundleMaxItems       int      `json:"turn_bundle_max_items,omitempty"`
-	TurnBundleMaxBytes       int      `json:"turn_bundle_max_bytes,omitempty"`
-	TurnBundleNextItemBytes  int      `json:"turn_bundle_next_item_bytes,omitempty"`
-	BundledByAttemptID       string   `json:"bundled_by_attempt_id,omitempty"`
-	BundledByDeliveryID      string   `json:"bundled_by_delivery_id,omitempty"`
-	StatusDescription        string   `json:"status_description"`
-	NextAction               string   `json:"next_action,omitempty"`
+	DeliveryID                string   `json:"delivery_id"`
+	CaseID                    string   `json:"case_id"`
+	OriginEventID             string   `json:"origin_event_id"`
+	OriginType                string   `json:"origin_type"`
+	Target                    string   `json:"target"`
+	PayloadDigest             string   `json:"payload_digest"`
+	Status                    string   `json:"internal_status"`
+	ProjectionStatus          string   `json:"status"`
+	AttemptEventID            string   `json:"attempt_event_id,omitempty"`
+	TerminalEventID           string   `json:"terminal_event_id,omitempty"`
+	AckedBy                   string   `json:"acked_by,omitempty"`
+	AckEventID                string   `json:"ack_event_id,omitempty"`
+	AttemptCount              int      `json:"attempt_count"`
+	DeliveryMode              string   `json:"delivery_mode"`
+	DeliveryTarget            string   `json:"delivery_target"`
+	Wakeup                    bool     `json:"wakeup"`
+	DecisionReason            string   `json:"decision_reason,omitempty"`
+	ContextState              string   `json:"context_state"`
+	TurnBundleVersion         int      `json:"turn_bundle_version,omitempty"`
+	TurnBundleDigest          string   `json:"turn_bundle_digest,omitempty"`
+	TurnPromptDigest          string   `json:"turn_prompt_digest,omitempty"`
+	TurnBundleDeliveryIDs     []string `json:"turn_bundle_delivery_ids,omitempty"`
+	TurnBundlePayloadDigests  []string `json:"turn_bundle_payload_digests,omitempty"`
+	TurnBundleItemBytes       []int    `json:"turn_bundle_item_bytes,omitempty"`
+	TurnBundleBytes           int      `json:"turn_bundle_bytes,omitempty"`
+	TurnBundleOverflow        int      `json:"turn_bundle_overflow,omitempty"`
+	TurnBundleMaxItems        int      `json:"turn_bundle_max_items,omitempty"`
+	TurnBundleMaxBytes        int      `json:"turn_bundle_max_bytes,omitempty"`
+	TurnBundleNextItemBytes   int      `json:"turn_bundle_next_item_bytes,omitempty"`
+	BundledByAttemptID        string   `json:"bundled_by_attempt_id,omitempty"`
+	BundledByDeliveryID       string   `json:"bundled_by_delivery_id,omitempty"`
+	StatusDescription         string   `json:"status_description"`
+	NextAction                string   `json:"next_action,omitempty"`
+	ActivationStatus          string   `json:"activation_status,omitempty"`
+	ActivationAttemptEventID  string   `json:"activation_attempt_event_id,omitempty"`
+	ActivationTerminalEventID string   `json:"activation_terminal_event_id,omitempty"`
+	ActivationAttemptCount    int      `json:"activation_attempt_count,omitempty"`
 }
 
 func describeDelivery(record *deliveryRecord) (string, string) {
@@ -83,6 +91,22 @@ func describeDelivery(record *deliveryRecord) (string, string) {
 	case deliveryFailedPreSend:
 		return "已确认没有投递给接收方", "运行 hq delivery retry"
 	case deliverySent:
+		if record.Origin.Type == "issue_prepared" && record.Ack.ID == "" {
+			switch record.ActivationStatus {
+			case activationAttempted:
+				return "issue 已注入，但 assignment 激活重投尚无可证明终态", "等待下一轮看门狗转为 unknown；禁止盲目重投"
+			case activationUnknown:
+				return "issue 已注入，但无法证明最近一次 assignment 激活重投是否送达", fmt.Sprintf("由 can_manage_staff 核对后运行 hq delivery resolve --id %s --outcome delivered|not-delivered --reason TEXT --evidence PATH", record.Origin.DeliveryID)
+			case activationFailedPreSend:
+				return "issue 首次注入成功；最近一次 assignment 激活重投已确证未送达", "HQ 会在员工席位恢复为安全 idle 后继续有界重试"
+			case activationExhausted:
+				return "issue 首次注入成功，但员工始终未 accept，自动激活重投额度已耗尽", fmt.Sprintf("经理核验终端后运行 hq delivery retry --id %s；不要新建 assignment", record.Origin.DeliveryID)
+			case activationSent:
+				return "issue 与最近一次激活重投均已确认注入，但员工仍未 accept", "HQ 会在超时后继续有界激活；不要重复派单"
+			default:
+				return "issue 已确认注入，但这不等于员工已 accept 激活", "HQ 将在 accept 超时且席位可安全重投时复用同一 assignment 自动激活"
+			}
+		}
 		return "HQ 已确认投递完成，但接收方未必已阅读或 ack", "如业务需要，等待接收方 ack"
 	case deliveryUnknown:
 		return "无法证明投递成功或失败", "由总裁办运维核对后运行 hq delivery resolve"
@@ -529,6 +553,10 @@ func (s *ledgerState) deliveryViews() []DeliveryView {
 		view.TerminalEventID = record.Terminal.ID
 		view.AckedBy = record.Ack.Actor
 		view.AckEventID = record.Ack.ID
+		view.ActivationStatus = record.ActivationStatus
+		view.ActivationAttemptEventID = record.ActivationAttempt.ID
+		view.ActivationTerminalEventID = record.ActivationTerminal.ID
+		view.ActivationAttemptCount = record.ActivationAttemptCount
 		views = append(views, view)
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].DeliveryID < views[j].DeliveryID })

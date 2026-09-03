@@ -216,10 +216,12 @@ type Config struct {
 }
 
 type DeliveryPolicy struct {
-	DefaultMode         string `json:"default_mode" yaml:"default_mode"`
-	MaxConsecutiveWakes int    `json:"max_consecutive_wakes" yaml:"max_consecutive_wakes"`
-	MaxBundleItems      int    `json:"max_bundle_items,omitempty" yaml:"max_bundle_items,omitempty"`
-	MaxBundleBytes      int    `json:"max_bundle_bytes,omitempty" yaml:"max_bundle_bytes,omitempty"`
+	DefaultMode               string `json:"default_mode" yaml:"default_mode"`
+	MaxConsecutiveWakes       int    `json:"max_consecutive_wakes" yaml:"max_consecutive_wakes"`
+	MaxBundleItems            int    `json:"max_bundle_items,omitempty" yaml:"max_bundle_items,omitempty"`
+	MaxBundleBytes            int    `json:"max_bundle_bytes,omitempty" yaml:"max_bundle_bytes,omitempty"`
+	AssignmentAcceptTimeout   string `json:"assignment_accept_timeout,omitempty" yaml:"assignment_accept_timeout,omitempty"`
+	MaxActivationRedeliveries int    `json:"max_activation_redeliveries,omitempty" yaml:"max_activation_redeliveries,omitempty"`
 }
 
 // RuntimeFallbackPolicy changes only the process that occupies a stable HQ
@@ -339,6 +341,15 @@ func validateConfig(cfg Config) error {
 		}
 		if cfg.DeliveryPolicy.MaxBundleBytes < 0 || cfg.DeliveryPolicy.MaxBundleBytes > maxDeliveryBundleBytes {
 			return fmt.Errorf("delivery_policy.max_bundle_bytes 必须省略/为 0，或在 1..%d", maxDeliveryBundleBytes)
+		}
+		if value := strings.TrimSpace(cfg.DeliveryPolicy.AssignmentAcceptTimeout); value != "" {
+			duration, err := time.ParseDuration(value)
+			if err != nil || duration < 15*time.Second || duration > time.Hour {
+				return fmt.Errorf("delivery_policy.assignment_accept_timeout 必须是 15s..1h 的 Go duration")
+			}
+		}
+		if value := cfg.DeliveryPolicy.MaxActivationRedeliveries; value < 0 || value > 10 {
+			return fmt.Errorf("delivery_policy.max_activation_redeliveries 必须省略/为 0，或在 1..10")
 		}
 	}
 	if policy := cfg.RuntimeFallback; policy != nil {

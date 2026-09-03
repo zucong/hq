@@ -688,7 +688,7 @@ func validateEventRequiredFields(event Event) error {
 	if handled, err := validateApprovalMessageRequiredFields(event); handled {
 		return err
 	}
-	if isNudgeEvent(event.Type) || isEstopEvent(event.Type) {
+	if isInfrastructureEvent(event.Type) {
 		return validateInfrastructureEventFields(event)
 	}
 	require := func(fields ...struct{ name, value string }) error { return requireEventFields(event, fields...) }
@@ -1396,6 +1396,14 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 			return err
 		}
 		if err := s.validateResolvedDeliveryState(event, record.Origin, cfg); err != nil {
+			return err
+		}
+
+	case "assignment_activation_attempted", "assignment_activation_sent",
+		"assignment_activation_failed_pre_send", "assignment_activation_unknown",
+		"assignment_activation_resolved_sent", "assignment_activation_resolved_not_sent",
+		"assignment_activation_exhausted":
+		if err := s.applyAssignmentActivationEvent(event, actorRule); err != nil {
 			return err
 		}
 

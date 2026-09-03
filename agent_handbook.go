@@ -208,7 +208,7 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 	fmt.Fprintln(&b, "## HQ × Herdr 工作协议")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "1. Herdr 只建立运行会话和递送门铃；裸 `herdr prompt`、普通聊天或口头请求都不是正式派活。人类所有者或其明确授权代理可以在已经由 HQ 激活的当前会话中，用 Herdr prompt 补充精确的外部工具权限；这只是工具层授权，不创建 case/issue/assignment，不改变角色卡、digest、reviewer 或 acceptance。")
-	fmt.Fprintln(&b, "2. 收到 `[HQ notification]` 后先运行公司本地 `ceo-office/tools/hq/bin/hq whoami`，再查看通知中的 case、assignment、角色卡 digest 与手册路径。")
+	fmt.Fprintln(&b, "2. 收到 `[HQ notification]` 后先运行公司本地 `ceo-office/tools/hq/bin/hq whoami`，再查看通知中的 case、assignment、角色卡 digest 与手册路径。同一 delivery/assignment 的通知可能由 HQ activation watchdog 有界重投；它仍是原任务，只 accept 原 event，不创建替代 case 或重复 assignment。")
 	fmt.Fprintln(&b, "3. 用 `hq assignment show --id <assignment-id>` 核对 objective、acceptance、constraints、due 和 reviewer；不一致时停止并升级。")
 	fmt.Fprintln(&b, "4. 只有正式 issue 才用 `hq accept --event <issue-event-id> --next <下一步>` 接单。Turn Bundle 中的 quiet handoff 是上下文，不会自行改变 case 状态；但收到并读懂 `question|request|handoff` 后，必须按信封运行 `hq message ack --message <message-id>` 写入 durable ack。ack 只证明收到，不表示接受结论；普通 `info` 不要求 ack。")
 	fmt.Fprintln(&b, "5. 在本工位或 assignment 指定的资料目录工作；不得把动态任务正文写回本角色卡。")
@@ -216,7 +216,7 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 	fmt.Fprintln(&b, "7. 只有收到 return 才在原 assignment 下返工并重新 report；submission 一旦被 accept，旧 assignment 就已消费，后续 message 不能将它复活。再次工作必须等待经理发出的 fresh issue。只有冻结 reviewer 可以 accept 或 return 你的交付。")
 	fmt.Fprintln(&b, "8. 不直接调用 Herdr 给下属或同事派活；需要沟通时使用 `hq message`，需要正式分工时由有权经理创建子 case 并 `hq issue`。所有者带外工具授权必须引用并继续原 HQ assignment，不能携带新的业务任务。")
 	if isManagerResponsibilities(rule.Responsibilities) {
-		fmt.Fprintln(&b, "9. 你是部门经理：先拆父 case，再从已批准的直属 seat 中按 role card 能力选择人员。向直属员工派工时直接 `hq issue`，不得申请或附加 `--approval`/`--decision`；非直属员工必须交由其直属经理安排。")
+		fmt.Fprintln(&b, "9. 你是部门经理：先拆父 case，再从已批准的直属 seat 中按 role card 能力选择人员。向直属员工派工时直接 `hq issue`，不得申请或附加 `--approval`/`--decision`；非直属员工必须交由其直属经理安排。若 issue 已 sent 但员工迟迟未 accept，先运行 `hq delivery status --id <delivery-id>`；activation unknown 用错误给出的 `delivery resolve`，确认未送达或 exhausted 时复用 `delivery retry`，不得重复 issue 或裸发 Herdr prompt。")
 	} else if rule.hasResponsibility(roleApprovalWitness) {
 		fmt.Fprintln(&b, "9. 你是总裁秘书，即唯一 `approval_witness` 职责位：你的姓名和花名不是权限标识。你只上传人类所有者已明确作出的决定，并据此向部门经理下达公司级事项；不得绕过经理直接给普通员工派活。")
 	} else {
