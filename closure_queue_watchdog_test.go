@@ -102,6 +102,7 @@ func TestClosureQueueWatchdogNudgesAccountCloserWithoutClosing(t *testing.T) {
 	prompts := fakePromptCalls(control)
 	if len(prompts) != 1 || !strings.HasPrefix(prompts[0], "prompt penny ") ||
 		!strings.Contains(prompts[0], "CLOSURE-WATCHDOG-001") || !strings.Contains(prompts[0], "hq close") ||
+		!strings.Contains(prompts[0], "本轮按列出顺序逐项核验至多1项") ||
 		!strings.Contains(prompts[0], "不得关闭open/blocked/needs_decision") {
 		t.Fatalf("closure nudge is not bounded and actionable: %v", prompts)
 	}

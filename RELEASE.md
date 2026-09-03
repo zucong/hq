@@ -128,7 +128,8 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
 - 空闲经理的 durable actionable queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒、向上升级；同一
   queue basis 跨重启去重，系统不得自动 accept/return 或伪造质量结论。
 - 已验收且满足 post-order 前置的 closure queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒唯一
-  account_closer；同一 status event basis 跨重启去重，系统不得自动 close 或把 blocked/needs_decision 当作完成。
+  account_closer；单轮明确逐项处理至多 8 个候选，同一 status event basis 跨重启去重，系统不得自动 close 或把
+  blocked/needs_decision 当作完成。
 - `on_assignment` seat 在原 assignment 仍未完成时，可由精确绑定的 report return 或合同 issuer 的 actionable
   message 从休眠中恢复；无关 case、非合同 actor、info message 不得取得启动权；prepared delivery reconcile
   必须复用原 ID 且至多 Prompt 一次。

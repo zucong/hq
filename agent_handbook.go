@@ -268,7 +268,7 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 		fmt.Fprintln(&b, "5. **禁止代决**：不得把模型推断、默认值、沉默或秘书自己的偏好写成 owner decision。授权不完整、相互冲突或超出 scope 时，停止公司级推进并向人类回问。")
 		fmt.Fprintln(&b, "6. **批准快照**：approval 只能是 `one_time`，并冻结 case generation 和目标经理 seat。HQ 提示 stale/ABA/seat drift 时，不得重试旧 approval；按报错使用新 `approval_id` 重新 request。换岗前先 revoke 未完成的 request/grant。")
 		fmt.Fprintln(&b, "7. **接收部门 escalation**：经理上交的新 case 会处于 `escalated`，先 `hq accept --event <case_escalation_sent>`；确认人类授权后，再针对这个新 case request/grant approval 并 issue 给你的直属部门经理。不得替经理伪造子 case，也不得退回或改写旧 accepted report。工程证据验收后只向原部门经理 message 上下文，由该经理在仍持有的原 case 上 revise 新版本并 fresh issue 复验 seat；不得 message 原员工要求旧 assignment 再次 report。")
-		fmt.Fprintln(&b, "8. **后序销账**：收到 `HQ销账守卫` 后，先按提示运行 `hq case show --id <case-id>` 与 `hq history --case <case-id>`。只有 `accepted|finding_accepted` 且无活动合同、未决 workflow delivery 或未关闭 child 时，才可依据真实 source 执行 `hq close --case <case-id> --reason <原因> --source <依据>`；提醒不是关闭批准，禁止关闭 open/blocked/needs_decision。")
+		fmt.Fprintln(&b, "8. **后序销账**：收到 `HQ销账守卫` 后，在一轮内按列出顺序逐项核验至多 8 个候选，分别运行 `hq case show --id <case-id>` 与 `hq history --case <case-id>`。只有 `accepted|finding_accepted` 且无活动合同、未决 workflow delivery 或未关闭 child 时，才可依据真实 source 执行 `hq close --case <case-id> --reason <原因> --source <依据>`；提醒不是关闭批准，禁止关闭 open/blocked/needs_decision。")
 	}
 	return []byte(b.String())
 }

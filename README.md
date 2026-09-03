@@ -578,8 +578,8 @@ trigger=assignment_progress` 指示其只从原 assignment、工位文件和 led
 验收完成也不能只靠 `account_closer` 自觉记得销账。gateway 的 closure queue watchdog 会从账本派生
 `accepted|finding_accepted` 且无活动 assignment、无未收敛 workflow delivery、所有直属 child 均已 `closed` 的
 后序候选；`open|blocked|needs_decision` 永远不会被当作已批准关闭。唯一 `account_closer` 在 `idle|done` 且最早
-候选超过同一 queue timeout 时，会收到带 `case show`、`history` 与 `close` 模板的 durable nudge；候选展示最多
-8 项，提醒次数有界且按 status event basis 跨重启去重。守卫只要求销账人逐项核验理由和 source，不会自动执行
+候选超过同一 queue timeout 时，会收到带 `case show`、`history` 与 `close` 模板的 durable nudge；每轮明确要求按顺序
+逐项核验最多 8 个候选，提醒次数有界且按 status event basis 跨重启去重。守卫只要求销账人逐项核验理由和 source，不会自动执行
 `close`，也不会把提醒本身当成关闭批准。`patrol` 以 `idle_with_closure_backlog` 报告这种验收与销账脱节。
 
 跨部门返工不是对旧 `accepted` report 执行 `return`，也不是一条 `message --kind handoff`。前者会倒转

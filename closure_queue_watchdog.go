@@ -98,17 +98,17 @@ func boundedClosureQueueCases(items []ClosureQueueItem) (string, int) {
 }
 
 func closureQueueReminderMessage(backlog ClosureQueueBacklog, stage, max int) string {
-	item := backlog.Items[0]
 	candidates, omitted := boundedClosureQueueCases(backlog.Items)
 	omittedText := ""
 	if omitted > 0 {
 		omittedText = fmt.Sprintf("，另有%d项将在后续后序批次处理", omitted)
 	}
-	message := fmt.Sprintf("HQ销账守卫%d/%d：发现%d个已验收且当前满足后序关闭前置的case。先核验case=%s：运行 hq case show --id %s 与 hq history --case %s；关闭依据成立时由你运行 hq close --case %s --reason TEXT --source PATH。候选=%s%s。逐项作业务判断；不得关闭open/blocked/needs_decision，也不得把本提醒当作关闭批准。",
-		stage, max, len(backlog.Items), item.CaseID, item.CaseID, item.CaseID, item.CaseID, candidates, omittedText)
+	message := fmt.Sprintf("HQ销账守卫%d/%d：发现%d个已验收且当前满足后序关闭前置的case。本轮按列出顺序逐项核验至多%d项：候选=%s%s。对每个CASE分别运行 hq case show --id CASE 与 hq history --case CASE；仅在该项关闭依据成立时运行 hq close --case CASE --reason TEXT --source PATH，然后继续下一项。处理完本批或遇到不能关闭的项即停止；不得关闭open/blocked/needs_decision，也不得把本提醒当作关闭批准。",
+		stage, max, len(backlog.Items), min(len(backlog.Items), closureQueuePromptItemLimit), candidates, omittedText)
 	if _, err := validateBusinessText("message", message, true); err == nil {
 		return message
 	}
+	item := backlog.Items[0]
 	return fmt.Sprintf("HQ销账守卫%d/%d：有%d个已验收case满足后序关闭前置。先运行 hq case show --id %s 与 hq history --case %s；依据成立时运行 hq close --case %s --reason TEXT --source PATH。不得自动关闭或代替业务判断。",
 		stage, max, len(backlog.Items), item.CaseID, item.CaseID, item.CaseID)
 }
