@@ -54,6 +54,7 @@ type DeliveryView struct {
 	DeliveryMode              string   `json:"delivery_mode"`
 	DeliveryTarget            string   `json:"delivery_target"`
 	Wakeup                    bool     `json:"wakeup"`
+	Urgency                   string   `json:"urgency"`
 	DecisionReason            string   `json:"decision_reason,omitempty"`
 	ContextState              string   `json:"context_state"`
 	TurnBundleVersion         int      `json:"turn_bundle_version,omitempty"`
@@ -437,12 +438,16 @@ func semanticDeliveredEvent(event Event, events map[string]Event) (Event, bool) 
 	semantic.Issuer = origin.Issuer
 	semantic.CapturedBy = origin.CapturedBy
 	semantic.MessageKind = origin.MessageKind
+	semantic.Urgency = origin.Urgency
 	semantic.MessageID = origin.MessageID
 	semantic.Message = origin.Message
 	semantic.ThreadID = origin.ThreadID
 	semantic.ReplyTo = origin.ReplyTo
 	semantic.RefFiles, semantic.RefCases = append([]string(nil), origin.RefFiles...), append([]string(nil), origin.RefCases...)
 	semantic.RefMessages, semantic.RefEvents = append([]string(nil), origin.RefMessages...), append([]string(nil), origin.RefEvents...)
+	semantic.SupersedesAssignmentEventID = origin.SupersedesAssignmentEventID
+	semantic.SupersedesAssignmentID = origin.SupersedesAssignmentID
+	semantic.BasisEventID = origin.BasisEventID
 	return semantic, true
 }
 
@@ -534,6 +539,7 @@ func (s *ledgerState) deliveryViews() []DeliveryView {
 			Status: record.Status, ProjectionStatus: deliveryProjectionStatus(record), AttemptCount: record.AttemptCount,
 			DeliveryMode: effectiveEventDeliveryMode(record.Origin), DeliveryTarget: effectiveEventDeliveryTarget(record.Origin),
 			Wakeup: eventWakesTarget(record.Origin), DecisionReason: record.Origin.DeliveryReason, ContextState: record.ContextState,
+			Urgency: effectiveMessageUrgency(record.Origin.Urgency),
 		}
 		view.StatusDescription, view.NextAction = describeDelivery(record)
 		view.AttemptEventID = record.Attempt.ID

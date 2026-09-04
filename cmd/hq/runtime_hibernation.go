@@ -849,6 +849,9 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 	if activationErr := child.recoverIssuedAssignmentActivationsOnce(ctx); activationErr != nil {
 		fmt.Fprintf(a.Err, "[HQ assignment activation] %v\n", activationErr)
 	}
+	if directiveErr := child.runUrgentDirectiveWatchdogOnce(ctx); directiveErr != nil {
+		fmt.Fprintf(a.Err, "[HQ urgent directive watchdog] %v\n", directiveErr)
+	}
 	if progressErr := child.runAssignmentProgressWatchdogOnce(ctx); progressErr != nil {
 		fmt.Fprintf(a.Err, "[HQ assignment progress] %v\n", progressErr)
 	}

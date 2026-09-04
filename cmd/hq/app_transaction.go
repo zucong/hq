@@ -697,11 +697,19 @@ func (a *App) fillSentState(event *Event, origin Event, ledger *ledgerState) {
 		event.NextAction, event.Note = origin.NextAction, origin.Note
 		event.Project = origin.Project
 		copyAssignmentBinding(event, origin)
+		event.SupersedesAssignmentEventID = origin.SupersedesAssignmentEventID
+		event.SupersedesAssignmentID = origin.SupersedesAssignmentID
+		event.BasisEventID = origin.BasisEventID
+		event.Urgency = origin.Urgency
 	case "message_prepared":
-		event.MessageKind, event.Message = origin.MessageKind, origin.Message
+		event.MessageKind, event.Urgency, event.Message = origin.MessageKind, origin.Urgency, origin.Message
 		event.MessageID, event.SourceRef, event.ThreadID, event.ReplyTo = origin.MessageID, origin.SourceRef, origin.ThreadID, origin.ReplyTo
 		event.RefFiles, event.RefCases = append([]string(nil), origin.RefFiles...), append([]string(nil), origin.RefCases...)
 		event.RefMessages, event.RefEvents = append([]string(nil), origin.RefMessages...), append([]string(nil), origin.RefEvents...)
+		if origin.MessageKind == "directive" {
+			event.CaseVersion, event.CaseDigest = origin.CaseVersion, origin.CaseDigest
+			copyAssignmentBinding(event, origin)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ type CaseStatus string
 
 const (
 	statusOpen            CaseStatus = "open"
+	statusRevisionPending CaseStatus = "revision_pending"
 	statusDispatched      CaseStatus = "dispatched"
 	statusInProgress      CaseStatus = "in_progress"
 	statusReported        CaseStatus = "reported"
@@ -25,7 +26,7 @@ const (
 )
 
 var knownCaseStatuses = map[CaseStatus]bool{
-	statusOpen: true, statusDispatched: true, statusInProgress: true,
+	statusOpen: true, statusRevisionPending: true, statusDispatched: true, statusInProgress: true,
 	statusReported: true, statusBlocked: true, statusNeedsDecision: true,
 	statusFindingReported: true, statusFindingAccepted: true,
 	statusEscalated: true, statusAccepted: true, statusReturned: true, statusClosed: true,
@@ -35,6 +36,7 @@ type transitionAction string
 
 const (
 	actionCreate               transitionAction = "create"
+	actionSupersedeAssignment  transitionAction = "supersede_assignment"
 	actionIssue                transitionAction = "issue"
 	actionAcceptOrder          transitionAction = "accept_order"
 	actionReportCompleted      transitionAction = "report_completed"
@@ -61,8 +63,13 @@ var transitionTable = map[transitionAction]map[CaseStatus]CaseStatus{
 	actionCreate: {
 		"": statusOpen,
 	},
+	actionSupersedeAssignment: {
+		statusDispatched: statusRevisionPending,
+		statusInProgress: statusRevisionPending,
+		statusReturned:   statusRevisionPending,
+	},
 	actionIssue: {
-		statusOpen: statusDispatched, statusReturned: statusDispatched,
+		statusOpen: statusDispatched, statusRevisionPending: statusDispatched, statusReturned: statusDispatched,
 		statusAccepted: statusDispatched, statusBlocked: statusDispatched,
 		statusNeedsDecision: statusDispatched, statusFindingAccepted: statusDispatched,
 	},
@@ -175,31 +182,33 @@ func acceptTargetState(original Event) (string, error) {
 }
 
 type caseAssignment struct {
-	EventID             string
-	StatusEventID       string
-	AssignmentID        string
-	AssignmentDigest    string
-	ContractVersion     int
-	AssigneeSeatVersion int
-	AssigneeSeatDigest  string
-	RoleCardID          string
-	RoleCardVersion     int
-	RoleCardDigest      string
-	RoleCardManualPath  string
-	CaseID              string
-	CaseVersion         int
-	CaseDigest          string
-	Project             string
-	Issuer              string
-	Recipient           string
-	Reviewer            string
-	ReviewerLabel       string
-	Acceptor            string
-	AcceptorLabel       string
-	DueAt               string
-	Status              string
-	Accepted            bool
-	Consumed            bool
+	EventID                  string
+	StatusEventID            string
+	AssignmentID             string
+	AssignmentDigest         string
+	ContractVersion          int
+	SupersedesAssignmentID   string
+	SupersededByAssignmentID string
+	AssigneeSeatVersion      int
+	AssigneeSeatDigest       string
+	RoleCardID               string
+	RoleCardVersion          int
+	RoleCardDigest           string
+	RoleCardManualPath       string
+	CaseID                   string
+	CaseVersion              int
+	CaseDigest               string
+	Project                  string
+	Issuer                   string
+	Recipient                string
+	Reviewer                 string
+	ReviewerLabel            string
+	Acceptor                 string
+	AcceptorLabel            string
+	DueAt                    string
+	Status                   string
+	Accepted                 bool
+	Consumed                 bool
 	// SubmissionGeneration is stable throughout one report attempt/review
 	// round and advances only when the reviewer returns that report for rework.
 	// SubmissionEventID reserves the one durable report_prepared allowed in the
@@ -215,46 +224,53 @@ type approvalLedgerRecord struct {
 	Status   string
 }
 
+type pendingAssignmentRevision struct {
+	Superseded Event
+	Revised    Event
+}
+
 type ledgerState struct {
-	snapshot               Snapshot
-	events                 map[string]Event
-	commands               map[string]Event
-	resolved               map[string]bool
-	assignments            map[string]*caseAssignment
-	assignmentList         []string
-	caseGenerations        map[string]string
-	ownerSubmissions       map[string]string
-	deliveries             map[string]*deliveryRecord
-	businessDeliveryRounds map[string]string
-	nudges                 map[string]*nudgeLedgerRecord
-	reminders              map[string]*reminderLedgerRecord
-	reminderCases          map[string]string
-	estops                 map[string]*estopLedgerRecord
-	approvals              map[string]*approvalLedgerRecord
-	deliveryWakeSpends     map[string]int
-	deliveryLastWake       map[string]string
-	turnBundleReservations map[string]string
+	snapshot                   Snapshot
+	events                     map[string]Event
+	commands                   map[string]Event
+	resolved                   map[string]bool
+	assignments                map[string]*caseAssignment
+	assignmentList             []string
+	caseGenerations            map[string]string
+	ownerSubmissions           map[string]string
+	deliveries                 map[string]*deliveryRecord
+	businessDeliveryRounds     map[string]string
+	nudges                     map[string]*nudgeLedgerRecord
+	reminders                  map[string]*reminderLedgerRecord
+	reminderCases              map[string]string
+	estops                     map[string]*estopLedgerRecord
+	approvals                  map[string]*approvalLedgerRecord
+	deliveryWakeSpends         map[string]int
+	deliveryLastWake           map[string]string
+	turnBundleReservations     map[string]string
+	pendingAssignmentRevisions map[string]*pendingAssignmentRevision
 }
 
 func newLedgerState() *ledgerState {
 	return &ledgerState{
-		snapshot:               newSnapshot(),
-		events:                 map[string]Event{},
-		commands:               map[string]Event{},
-		resolved:               map[string]bool{},
-		assignments:            map[string]*caseAssignment{},
-		caseGenerations:        map[string]string{},
-		ownerSubmissions:       map[string]string{},
-		deliveries:             map[string]*deliveryRecord{},
-		businessDeliveryRounds: map[string]string{},
-		nudges:                 map[string]*nudgeLedgerRecord{},
-		reminders:              map[string]*reminderLedgerRecord{},
-		reminderCases:          map[string]string{},
-		estops:                 map[string]*estopLedgerRecord{},
-		approvals:              map[string]*approvalLedgerRecord{},
-		deliveryWakeSpends:     map[string]int{},
-		deliveryLastWake:       map[string]string{},
-		turnBundleReservations: map[string]string{},
+		snapshot:                   newSnapshot(),
+		events:                     map[string]Event{},
+		commands:                   map[string]Event{},
+		resolved:                   map[string]bool{},
+		assignments:                map[string]*caseAssignment{},
+		caseGenerations:            map[string]string{},
+		ownerSubmissions:           map[string]string{},
+		deliveries:                 map[string]*deliveryRecord{},
+		businessDeliveryRounds:     map[string]string{},
+		nudges:                     map[string]*nudgeLedgerRecord{},
+		reminders:                  map[string]*reminderLedgerRecord{},
+		reminderCases:              map[string]string{},
+		estops:                     map[string]*estopLedgerRecord{},
+		approvals:                  map[string]*approvalLedgerRecord{},
+		deliveryWakeSpends:         map[string]int{},
+		deliveryLastWake:           map[string]string{},
+		turnBundleReservations:     map[string]string{},
+		pendingAssignmentRevisions: map[string]*pendingAssignmentRevision{},
 	}
 }
 
@@ -720,6 +736,22 @@ func validateEventRequiredFields(event Event) error {
 			return fmt.Errorf("case_revised 缺少 previous_case_digest")
 		}
 		return nil
+	case "assignment_superseded":
+		if err := require(eventField("related_event_id", event.RelatedEventID), eventField("assignment_event_id", event.AssignmentEventID),
+			eventField("assignment_id", event.AssignmentID), eventField("assignment_digest", event.AssignmentDigest),
+			eventField("supersedes_assignment_event_id", event.SupersedesAssignmentEventID),
+			eventField("supersedes_assignment_id", event.SupersedesAssignmentID),
+			eventField("replacement_assignment_id", event.ReplacementAssignmentID),
+			eventField("case_digest", event.CaseDigest), eventField("from_state", event.FromState),
+			eventField("to_state", event.ToState), eventField("owner", event.Owner),
+			eventField("recipient", event.Recipient), eventField("recipient_label", event.RecipientLabel),
+			eventField("next_action", event.NextAction)); err != nil {
+			return err
+		}
+		if event.CaseVersion < 1 {
+			return fmt.Errorf("assignment_superseded 缺少合法 case_version")
+		}
+		return nil
 	case "case_escalation_prepared":
 		if event.CaseVersion != 1 {
 			return fmt.Errorf("case_escalation_prepared case_version 必须为 1")
@@ -911,6 +943,9 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 	if err := s.validateBusinessDeliveryFence(event); err != nil {
 		return err
 	}
+	if err := s.validatePendingAssignmentRevisionSequence(event); err != nil {
+		return err
+	}
 
 	switch event.Type {
 	case "approval_requested", "approval_granted", "approval_consumed",
@@ -978,6 +1013,11 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 			return fmt.Errorf("case_created case_digest 与事件最终规格不匹配：event=%s computed=%s", event.CaseDigest, expected)
 		}
 
+	case "assignment_superseded":
+		if err := s.applyAssignmentSupersededEvent(event, cfg); err != nil {
+			return err
+		}
+
 	case "case_revised":
 		state, err := s.currentCase(event.CaseID)
 		if err != nil {
@@ -988,6 +1028,16 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 		}
 		if state.Status == string(statusEscalated) {
 			return fmt.Errorf("case 正在等待上级核验 escalation；必须先 accept/return，再修订规格")
+		}
+		if state.Status == string(statusRevisionPending) {
+			pending := s.pendingAssignmentRevisions[event.CaseID]
+			if pending == nil || pending.Superseded.ID == "" || event.BasisEventID != pending.Superseded.ID {
+				return fmt.Errorf("revision_pending case revise 缺少同一原子 supersede basis")
+			}
+			if pending.Superseded.ReplacementAssignmentID == "" || pending.Superseded.NextAction == "" {
+				return fmt.Errorf("assignment revision supersede 未冻结 replacement contract")
+			}
+			pending.Revised = event
 		}
 		if err := s.rejectActiveAssignment(event.CaseID, "修订规格"); err != nil {
 			return err

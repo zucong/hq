@@ -1,10 +1,23 @@
-# HQ v1.1.5 正式发布与安装
+# HQ v1.2.0 正式发布与安装
 
-HQ v1.1.5 是事件驱动的经理停车版本：保留 v1.1.4 的全部 CLI、registry v3、event v3
-及公司实例合同，同时让经理在委派后依据实时 durable 队列结束回合、由下属事件重新唤醒。本文定义它的构建、
+HQ v1.2.0 是加急在途变更版本：保留 v1.1.5 的 registry v3、event v3 与公司实例合同，
+增加绑定 active assignment 的加急指令，以及可审计、不可回退的 assignment replacement。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.2.0 加急在途变更
+
+- `message --kind directive --urgency urgent` 精确绑定 active assignment 和冻结 authority，强制在目标下一安全
+  回合投递，即使目标 working 或普通 wake budget 已耗尽也不静默降级；它要求 ack，但保持业务投影不变；
+- gateway 对 sent 但未 ack 的加急 directive 做稳定去重、有界 durable 催办，并沿接收者 `reports_to` 升级；
+  守卫不代 ack、不改 case/assignment，也不以 Ctrl-C 中断半个模型回合；
+- `case revise --supersede-active --next ...` 在一个原子 batch 中消费旧 assignment、建立 case vN+1、准备发给
+  同一直属 assignee 的 replacement；旧合同立即永久失效，failed-pre-send 只允许 retry 原 delivery；
+- strict replay 强制 supersede/revise/replacement 紧邻配对、完整合同绑定、同一汇报线与 v3 replacement digest；
+  submitted 必须先 return，防止已到 review 的证据被吞掉；
+- 回归覆盖忙碌投递、预算绕过、ack 催办/升级、失败恢复、幂等重试，以及“总部联络职责位 → 部门经理 →
+  直属员工”的两跳真实组织变更场景。
 
 ## v1.1.5 事件驱动的经理停车
 
@@ -67,7 +80,7 @@ HQ v1.1.5 是事件驱动的经理停车版本：保留 v1.1.4 的全部 CLI、r
 
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.1.5 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 v1.2.0 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -84,8 +97,8 @@ fail closed，并由公司所有者明确从 v1.1.5 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.1.5 <完整小写commit> /tmp/hq-v1.1.5-release
-./scripts/release.sh verify /tmp/hq-v1.1.5-release
+./scripts/release.sh build v1.2.0 <完整小写commit> /tmp/hq-v1.2.0-release
+./scripts/release.sh verify /tmp/hq-v1.2.0-release
 ./scripts/test-gates.sh
 ```
 
@@ -147,6 +160,10 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
 18. 模拟 Codex safety-buffering 完整选择器遮挡 footer：HQ 必须保持原 model/effort、零 send-keys、零 Prompt、
     零 profile drift/restart；选择器消失后恢复 footer 核验。模拟 gateway 的获授权 maintenance seat 更换
     pane：watchdog 必须解析同一 seat 的新 binding 后继续 nudge；无法解析时必须清空 stale pane 并停止投递。
+19. 模拟 active assignment 执行中需求变化：urgent directive 对 working 目标必须固定 next-turn、绕过普通 wake
+    budget、要求 ack；超时后有界催办并沿 reports_to 升级。合同变更必须以 `case revise --supersede-active`
+    原子产生 superseded → revision_pending/vN+1 → replacement，同一直属 assignee 不变；failed-pre-send 只能
+    retry 原 delivery，旧 assignment 永不恢复。最后验证总部联络职责位到经理、经理到员工的两跳传播。
 
 公司实例不依赖源码目录或全局 `hq`，但运行环境必须单独提供 `herdr` 与 registry 所选
 Agent kind 的 CLI。首条业务写入前应保留 registry、Role Card 手册、成立决策和发布 checksum 的审计记录。
@@ -204,6 +221,8 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
 - `on_assignment` seat 在原 assignment 仍未完成时，可由精确绑定的 report return 或合同 issuer 的 actionable
   message 从休眠中恢复；无关 case、非合同 actor、info message 不得取得启动权；prepared delivery reconcile
   必须复用原 ID 且至多 Prompt 一次。
+- urgent directive 必须绑定 active assignment、使用下一安全回合且不得被 wake budget 静默降级；未 ack 由 gateway
+  有界提醒并向直属上级升级。重大合同变更只能原子 supersede/revise/reissue，旧合同不可回退，组织传播不可越级。
 - 全部公开命令路径和可见参数都有本地帮助；未知命令/flag、缺失/条件必填参数和业务错误均满足 Agent
   自解释错误合同，纯参数错误不被 office/gateway/Herdr 依赖发现遮蔽。
 - `approval show`、`delivery status` 与 `nudge status` 必须在无 Herdr 身份的宿主机保持纯只读可用；同命令族的 mutation 仍经

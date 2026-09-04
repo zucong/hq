@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.1.5 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.2.0 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -523,6 +523,13 @@ HQ 错误永远不会建议用裸 `herdr prompt` 绕过账本。
   --constraints <复验边界> --priority P1 --source <已验收修复证据>
 ./bin/hq issue --case <quality-case-id> --to <direct-reverify-seat> --next <复验下一步>
 
+# active assignment 执行期间出现重大需求变化：冻结 issuer 原子作废旧合同、
+# 建立 vN+1，并向同一直属 assignee 推送 replacement assignment。
+./bin/hq case revise --id <active-case-id> --version <N+1> \
+  --title <新标题> --objective <新目标> --acceptance <新验收> \
+  --constraints <新边界> --priority P0 --source <变更依据> \
+  --supersede-active --next <收到 replacement 后的第一步> --note <变更原因>
+
 # 由 account closer 或其他 can_close 角色销账
 ./bin/hq close --case CASE-ID --reason <原因> --source <依据路径>
 ```
@@ -531,7 +538,9 @@ HQ 只有 `case` 一个工作概念。case 自带目标、验收、约束、优�
 `parent_case_id/root_case_id` 形成父子层级。每个 HQ space 恰好承载一个 Project 执行总部：第一条业务 case
 是唯一 root，必须显式提供非空 `--project`；之后所有 case 都必须提供 `--parent`。child 的
 `project` 和 `root_case_id` 由 HQ 从 parent 自动继承，显式传 `--project` 会被拒绝。`case revise`
-只能更新规格，不接受 `--project`；Project identity 在 root 创建时即冻结。经理把自己持有的
+只能更新规格，不接受 `--project`；Project identity 在 root 创建时即冻结。默认 revise 仍要求没有 active
+assignment；`--supersede-active` 是在途重大变更的唯一入口，只允许冻结 issuer/reviewer/acceptor 将
+`issued|accepted|rework` 的唯一旧合同原子替换给同一直属 assignee。经理把自己持有的
 父 case 拆成多个 child 后分别委派；child 独立流转，父 case 不被子任务隐式改写。`issue`
 是唯一纵向派活动词。严格回放同样拒绝空 project、第二个 root/project、断裂 lineage 或 project 改名；
 不读取旧行为也不自动迁移。新项目必须创建新的 HQ 目录和 Herdr workspace。
@@ -678,7 +687,7 @@ seat incarnation 后也不能沿用旧批准。HQ 会在拒绝时提示用新 `a
 message ID。Agent 间信封固定以 `[HQ message]` 开头，派活、回报、核验等信封固定以
 `[HQ notification]` 开头，以便与公司所有者直接对 Agent 说的话区分。
 
-`question|request|handoff` 属于行动型消息：信封会给出精确的
+`question|request|handoff|directive` 属于行动型消息：信封会给出精确的
 `hq message ack --message <message-id>`。接收方读懂后必须先写入 durable ack；ack 只证明收到，
 不表示接受结论，也不改变 case owner/status。未 ack 会同时阻止发送方和接收方的
 `on_assignment` runtime 自动休眠。普通 `info` 不要求 ack。
@@ -689,6 +698,26 @@ message ID。Agent 间信封固定以 `[HQ message]` 开头，派活、回报、
 - `quiet`：进入下一回合上下文但不唤醒；
 - `inject`：注入下一步骤但不唤醒；
 - `auto`：根据目标忙闲、消息类型和连续唤醒预算选择。
+
+执行中的临时指令使用 `--kind directive`；重大需求变更不要假装成普通 message：
+
+```bash
+./bin/hq message --to <direct-report> --case <active-case-id> \
+  --kind directive --urgency urgent --text <立即调整或安全停止要求>
+```
+
+`directive` 必须精确绑定接收方当前 active assignment，并由该合同冻结的 issuer/reviewer/acceptor 发出；
+它要求 durable ack，但不会修改 objective、acceptance、constraints、owner 或 case 状态。
+`--urgency urgent` 强制 `wakeup + next-turn`，即使目标处于 working 或已耗尽普通连续唤醒预算也不会静默降级；
+它是在当前模型回合完成后的安全边界递送，不会发送 Ctrl-C 或在半个工具调用中硬中断。未 ack 的加急指令由
+gateway 有界 durable 催办，随后沿接收者的 `reports_to` 升级，HQ 不会替接收者 ack。
+
+如果变更会改变任务合同，冻结 issuer 必须使用上面的 `case revise --supersede-active`。同一原子事务依次记录
+`assignment_superseded → case_revised(vN+1) → replacement issue_prepared`；旧 assignment 从落账时起不可再
+accept/report，replacement 固定发给同一直属 assignee。若 replacement 在发送前确证失败，case 保持
+`revision_pending`、旧合同仍无效，只能对原 delivery 执行 `delivery retry`；不允许回退旧合同或创建第二份任务。
+总部联络职责位只替换直属部门经理的公司级 assignment；经理 accept replacement 后，再在对应 child case
+执行同样的原子修订并推送给自己的直属下属。HQ 不允许总部越级把变更直接写进员工合同。
 
 `issue` 永远使用 `wakeup`。HQ 会在已有唤醒 prompt 中按 FIFO 选择不超过 policy item/byte 双上限的
 静默上下文前缀，或在接收方执行 `accept` 时附加尚未合并的上下文；每条消息之间空一行。
@@ -824,7 +853,7 @@ case `updated_at`。
 
 - runtime 处于 idle/done，keep-warm 已到期，并且最终 snapshot 的精确 terminal/native session 绑定仍一致；
 - 没有 active WIP、该 seat 持有的未决 case、未决正式 workflow delivery、nudge 或 reminder；
-- 没有尚未 ack 的行动型 `question|request|handoff`；quiet/inject 的非行动 info 可保留在 durable
+- 没有尚未 ack 的行动型 `question|request|handoff|directive`；quiet/inject 的非行动 info 可保留在 durable
   Turn Bundle，不会让一个已完成的专业 seat 永久常驻，下次有权 issue 唤醒时再消费。
 
 休眠不是撤销 assignment。若员工仍持有未完成合同，精确绑定该合同的 report return，或由冻结
@@ -1009,7 +1038,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.1.5 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.0 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证

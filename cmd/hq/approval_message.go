@@ -194,6 +194,9 @@ func (s *ledgerState) validateLedgerFinalInvariants(cfg Config) error {
 	if err := s.validateApprovalFinalInvariants(); err != nil {
 		return err
 	}
+	if err := s.validateAssignmentRevisionFinalInvariant(); err != nil {
+		return err
+	}
 	return s.validateCandidateSeatContinuity(cfg)
 }
 
@@ -592,6 +595,9 @@ func (s *ledgerState) applyApprovalMessageEvent(event Event, cfg Config, actorRu
 		if state.Status != event.FromState {
 			return fmt.Errorf("issue_prepared 前态不匹配")
 		}
+		if event.AuthorizationType != "revision" && (event.SupersedesAssignmentEventID != "" || event.SupersedesAssignmentID != "" || event.BasisEventID != "") {
+			return fmt.Errorf("普通 issue 不得携带 supersede/revision binding")
+		}
 		if err := validateStateTransition(actionIssue, state.Status, string(statusDispatched)); err != nil {
 			return err
 		}
@@ -634,10 +640,27 @@ func (s *ledgerState) applyApprovalMessageEvent(event Event, cfg Config, actorRu
 			if err := validateDigest("authorization_digest", event.AuthorizationDigest); err != nil {
 				return err
 			}
+		case "revision":
+			pending := s.pendingAssignmentRevisions[event.CaseID]
+			if pending == nil || pending.Revised.ID == "" || event.BasisEventID != pending.Revised.ID {
+				return fmt.Errorf("revision issue 必须紧邻同一原子 supersede + case_revised")
+			}
+			superseded := pending.Superseded
+			old := s.assignments[superseded.AssignmentEventID]
+			if old == nil || !old.Consumed || old.Status != "superseded" || old.SupersededByAssignmentID != event.AssignmentID ||
+				event.SupersedesAssignmentEventID != old.EventID || event.SupersedesAssignmentID != old.AssignmentID ||
+				event.Recipient != old.Recipient || event.Actor != old.Issuer || event.Reviewer != old.Reviewer || event.Acceptor != old.Acceptor ||
+				superseded.ReplacementAssignmentID != event.AssignmentID {
+				return fmt.Errorf("revision issue 未匹配被 supersede 的冻结 assignment")
+			}
+			expectedAuthorization := assignmentRevisionAuthorizationDigest(old, event.AssignmentID, event.CaseVersion, event.CaseDigest)
+			if event.AuthorizationDigest != expectedAuthorization {
+				return fmt.Errorf("revision authorization digest 不匹配")
+			}
 		default:
 			return fmt.Errorf("未知 issue authorization_type %q", event.AuthorizationType)
 		}
-		if cfg.isManager(actorRule) && event.AuthorizationType != "manager" {
+		if cfg.isManager(actorRule) && event.AuthorizationType != "manager" && event.AuthorizationType != "revision" {
 			return fmt.Errorf("经理不得借 approval/decision 对非直属 issue")
 		}
 		if err := requireNoStateFields(event); err != nil {
@@ -651,6 +674,9 @@ func (s *ledgerState) applyApprovalMessageEvent(event Event, cfg Config, actorRu
 		}
 		if err := validateAssignmentContractEvent(event, cfg); err != nil {
 			return err
+		}
+		if event.AuthorizationType == "revision" {
+			delete(s.pendingAssignmentRevisions, event.CaseID)
 		}
 		return nil
 
@@ -699,6 +725,30 @@ func (s *ledgerState) applyApprovalMessageEvent(event Event, cfg Config, actorRu
 		}
 		if !validMessageKind(event.MessageKind) {
 			return fmt.Errorf("message kind 非法")
+		}
+		if !validMessageUrgency(effectiveMessageUrgency(event.Urgency)) {
+			return fmt.Errorf("message urgency 非法")
+		}
+		if effectiveMessageUrgency(event.Urgency) == messageUrgencyUrgent && event.MessageKind != "directive" {
+			return fmt.Errorf("urgent message 必须是绑定 active assignment 的 directive")
+		}
+		if effectiveMessageUrgency(event.Urgency) == messageUrgencyUrgent &&
+			(effectiveEventDeliveryMode(event) != deliveryModeWakeup || effectiveEventDeliveryTarget(event) != deliveryTargetNextTurn || event.DeliveryReason != "urgent-next-turn") {
+			return fmt.Errorf("urgent message 必须固定为 wakeup/next-turn 且 reason=urgent-next-turn")
+		}
+		if event.MessageKind == "directive" {
+			if event.CaseID == "" {
+				return fmt.Errorf("directive 必须绑定 case 与 active assignment")
+			}
+			assignment := s.assignments[event.AssignmentEventID]
+			if assignment == nil || assignment.Consumed || assignment.CaseID != event.CaseID || assignment.Recipient != event.Recipient ||
+				(event.Actor != assignment.Issuer && event.Actor != assignment.Reviewer && event.Actor != assignment.Acceptor) ||
+				event.CaseVersion != assignment.CaseVersion || event.CaseDigest != assignment.CaseDigest ||
+				!eventMatchesAssignmentState(event, assignment) {
+				return fmt.Errorf("directive 未冻结匹配的 active assignment 或 issuer/reviewer/acceptor authority")
+			}
+		} else if event.AssignmentEventID != "" || event.AssignmentID != "" || event.AssignmentDigest != "" {
+			return fmt.Errorf("只有 directive message 可以携带 assignment binding")
 		}
 		if event.MessageID != "" {
 			if err := validateLedgerID("message_id", event.MessageID); err != nil {
@@ -775,7 +825,7 @@ func mustParseTime(value string) time.Time {
 
 func validMessageKind(value string) bool {
 	switch value {
-	case "info", "question", "request", "handoff":
+	case "info", "question", "request", "handoff", "directive":
 		return true
 	}
 	return false
@@ -787,7 +837,10 @@ func sameIssueContract(a, b Event) bool {
 		a.CaseVersion == b.CaseVersion && a.CaseDigest == b.CaseDigest &&
 		a.AuthorizationType == b.AuthorizationType &&
 		a.AuthorizationDigest == b.AuthorizationDigest && a.ApprovalID == b.ApprovalID && a.DecisionRef == b.DecisionRef &&
-		a.Issuer == b.Issuer && a.CapturedBy == b.CapturedBy && a.NextAction == b.NextAction && a.Note == b.Note &&
+		a.Issuer == b.Issuer && a.CapturedBy == b.CapturedBy && a.NextAction == b.NextAction && a.Note == b.Note && a.BasisEventID == b.BasisEventID &&
+		a.SupersedesAssignmentEventID == b.SupersedesAssignmentEventID &&
+		a.SupersedesAssignmentID == b.SupersedesAssignmentID &&
+		effectiveMessageUrgency(a.Urgency) == effectiveMessageUrgency(b.Urgency) &&
 		sameAssignmentBinding(a, b) &&
 		effectiveEventDeliveryMode(a) == effectiveEventDeliveryMode(b) && effectiveEventDeliveryTarget(a) == effectiveEventDeliveryTarget(b)
 }
@@ -796,9 +849,11 @@ func sameMessageContract(a, b Event) bool {
 	return a.Actor == b.Actor && a.ActorLabel == b.ActorLabel && a.ActorPaneID == b.ActorPaneID &&
 		a.Recipient == b.Recipient && a.RecipientLabel == b.RecipientLabel && a.CaseID == b.CaseID &&
 		a.MessageID == b.MessageID && a.MessageKind == b.MessageKind && a.Message == b.Message && a.SourceRef == b.SourceRef &&
+		effectiveMessageUrgency(a.Urgency) == effectiveMessageUrgency(b.Urgency) &&
 		a.ThreadID == b.ThreadID && a.ReplyTo == b.ReplyTo &&
 		stringListsEqual(a.RefFiles, b.RefFiles) && stringListsEqual(a.RefCases, b.RefCases) &&
 		stringListsEqual(a.RefMessages, b.RefMessages) && stringListsEqual(a.RefEvents, b.RefEvents) &&
+		a.CaseVersion == b.CaseVersion && a.CaseDigest == b.CaseDigest && sameAssignmentBinding(a, b) &&
 		effectiveEventDeliveryMode(a) == effectiveEventDeliveryMode(b) && effectiveEventDeliveryTarget(a) == effectiveEventDeliveryTarget(b)
 }
 
@@ -1065,10 +1120,18 @@ func formatIssueEnvelope(event Event, ref string) (string, error) {
 	if due == "" {
 		due = "none"
 	}
-	message := fmt.Sprintf("[HQ notification][%s] CASE=%s VERSION=%d DIGEST=%s ASSIGNMENT=%s CONTRACT=%s ROLE_CARD=%s@%d ROLE_DIGEST=%s MANUAL=%s SEAT_VERSION=%d SEAT_DIGEST=%s ACCEPTOR=%s DUE=%s EVENT=%s DELIVERY=%s：正式委派；先完整阅读 MANUAL，再运行 `hq accept --event %s`；下一步：%s；HQ 会在本次唤醒 prompt 中自动附带此前静默消息（如有）；账本：%s",
-		event.ActorLabel, event.CaseID, event.CaseVersion, event.CaseDigest, event.AssignmentID, event.AssignmentDigest,
+	prefix := "[HQ notification]"
+	revision := ""
+	revisionInstruction := ""
+	if event.SupersedesAssignmentID != "" {
+		prefix = "[HQ URGENT REVISION]"
+		revision = fmt.Sprintf(" SUPERSEDES=%s", event.SupersedesAssignmentID)
+		revisionInstruction = "旧 assignment 已失效，不得再按旧合同 report；若新要求影响你已委派的直属 child，必须对对应 active child 使用 `hq case revise --supersede-active` 逐级更新，不得用普通 message 冒充合同变更；"
+	}
+	message := fmt.Sprintf("%s[%s] CASE=%s VERSION=%d DIGEST=%s ASSIGNMENT=%s%s CONTRACT=%s ROLE_CARD=%s@%d ROLE_DIGEST=%s MANUAL=%s SEAT_VERSION=%d SEAT_DIGEST=%s ACCEPTOR=%s DUE=%s EVENT=%s DELIVERY=%s：正式委派；%s先完整阅读 MANUAL，再运行 `hq accept --event %s`；下一步：%s；HQ 会在本次唤醒 prompt 中自动附带此前静默消息（如有）；账本：%s",
+		prefix, event.ActorLabel, event.CaseID, event.CaseVersion, event.CaseDigest, event.AssignmentID, revision, event.AssignmentDigest,
 		event.RoleCardID, event.RoleCardVersion, event.RoleCardDigest, event.RoleCardManualPath,
-		event.AssigneeSeatVersion, event.AssigneeSeatDigest, event.Acceptor, due, event.ID, event.DeliveryID, event.ID, event.NextAction, ref)
+		event.AssigneeSeatVersion, event.AssigneeSeatDigest, event.Acceptor, due, event.ID, event.DeliveryID, revisionInstruction, event.ID, event.NextAction, ref)
 	if !utf8.ValidString(message) || strings.ContainsRune(message, '\x00') || len([]byte(message)) > maxTurnBundleBaseBytes {
 		return "", fmt.Errorf("issue 门铃载荷超过 %d KiB 总线基线", maxTurnBundleBaseBytes/1024)
 	}
@@ -1089,8 +1152,24 @@ func formatMessageEnvelope(event Event, ref string) (string, error) {
 	if messageNeedsAction(event.MessageKind) {
 		ack = fmt.Sprintf("；收到并读懂后必须先运行 `hq message ack --message %s` 写入 durable ack；未 ack 会阻止双方的 on_assignment runtime 休眠", messageID)
 	}
-	message := fmt.Sprintf("[HQ message][%s] MESSAGE=%s KIND=%s%s THREAD=%s DELIVERY=%s：%s%s%s；账本：%s",
-		event.ActorLabel, messageID, event.MessageKind, casePart, event.ThreadID, event.DeliveryID, event.Message, refs, ack, ref)
+	if event.Urgency == "" && event.MessageKind != "directive" {
+		message := fmt.Sprintf("[HQ message][%s] MESSAGE=%s KIND=%s%s THREAD=%s DELIVERY=%s：%s%s%s；账本：%s",
+			event.ActorLabel, messageID, event.MessageKind, casePart, event.ThreadID, event.DeliveryID, event.Message, refs, ack, ref)
+		if len([]byte(message)) > 8*1024 {
+			return "", fmt.Errorf("message 总线信封超过 8 KiB；减少引用数量")
+		}
+		return message, nil
+	}
+	prefix := "[HQ message]"
+	if effectiveMessageUrgency(event.Urgency) == messageUrgencyUrgent {
+		prefix = "[HQ URGENT DIRECTIVE]"
+	}
+	binding := ""
+	if event.MessageKind == "directive" {
+		binding = fmt.Sprintf(" ASSIGNMENT=%s CASE_VERSION=%d CASE_DIGEST=%s", event.AssignmentID, event.CaseVersion, event.CaseDigest)
+	}
+	message := fmt.Sprintf("%s[%s] MESSAGE=%s KIND=%s URGENCY=%s%s%s THREAD=%s DELIVERY=%s：%s%s%s；本消息不修改 assignment objective/acceptance/constraints；如需修改合同，由冻结 issuer 使用 `hq case revise --supersede-active`；账本：%s",
+		prefix, event.ActorLabel, messageID, event.MessageKind, effectiveMessageUrgency(event.Urgency), casePart, binding, event.ThreadID, event.DeliveryID, event.Message, refs, ack, ref)
 	if len([]byte(message)) > 8*1024 {
 		return "", fmt.Errorf("message 总线信封超过 8 KiB；减少引用数量")
 	}

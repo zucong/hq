@@ -10,6 +10,7 @@ const projectViewVersion = 2
 
 var projectCaseStatusOrder = []string{
 	string(statusOpen),
+	string(statusRevisionPending),
 	string(statusDispatched),
 	string(statusInProgress),
 	string(statusReported),

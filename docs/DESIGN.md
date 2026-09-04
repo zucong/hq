@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.1.5 已正式发布；本文定义当前正式合同**
+状态：**v1.2.0 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -333,7 +333,7 @@ runtime 存活期。资格评估要求：
 - 精确 session 绑定（workspace/tab/pane/agent/terminal/native session）仍与最终 Herdr snapshot 一致，
   runtime 不得处于 working/blocked；
 - 没有 active assignment、目标 seat 持有的未决 case、未决 workflow delivery、nudge 或 reminder；
-- 已 sent 的行动型 `question|request|handoff` 必须有 durable Ack；非行动 quiet/inject info 可留在
+- 已 sent 的行动型 `question|request|handoff|directive` 必须有 durable Ack；非行动 quiet/inject info 可留在
   Turn Bundle 中随 seat 休眠，下次 issue 唤醒时消费。
 
 session 诊断状态机为 `started → hibernate_attempting → stopped`，可以转入
@@ -485,11 +485,27 @@ issue(同一直属 QA seat)                            finding_accepted -> dispa
 accept -> report -> manager accept                 独立复验闭环
 ```
 
-`case revise` 要求当前 owner、没有 active assignment，并追加引用当前 spec event/digest；strict replay 将新 issue
+默认 `case revise` 要求当前 owner、没有 active assignment，并追加引用当前 spec event/digest；strict replay 将新 issue
 冻结到 vN+1 digest 和新 business generation。旧员工若在只有 message、没有 fresh issue 时再次 `report`，HQ
 按 `case_id + recipient` 识别已消费 assignment，拒绝且不写账，并向当前 owner 给出可执行的
 `case revise --version <N+1>` 与 `issue --to <原 seat>`。因此 case 可以通过显式版本进入下一轮工作，而已验收
 submission 和旧 Assignment Contract 不会被倒转或复用。
+
+在途重大需求变化使用 `case revise --supersede-active`，不借 message 暗改合同。它只允许唯一 active assignment
+冻结的 issuer/reviewer/acceptor 执行，只接受 `issued|accepted|rework`，并固定复用原直属 assignee、reviewer、
+acceptor、Role Card 与 Employee Seat。一次 ledger batch 必须严格相邻地包含：
+
+```text
+assignment_superseded: old contract consumed, case -> revision_pending, owner=issuer
+case_revised(vN+1):    new immutable spec generation/digest
+issue_prepared(v3):    replacement assignment, supersedes=old, urgent next-turn
+```
+
+strict replay 将未完整配对、顺序/digest/basis 不一致或改投他人的链视为损坏。旧合同从 batch 落账后永久不可执行；
+replacement 发送前确证失败时，case 留在 `revision_pending`，只可 retry 同一 delivery。发送成功才进入 dispatched；
+assignee 仍须 accept 新 assignment。submitted assignment 必须先由冻结 acceptor return 当前 report，再按 rework
+状态执行 supersede，避免丢失已经到达 review 的证据。组织传播保持逐级：总部联络职责位只能替换直属经理合同；
+经理接收后再修订直属 child/员工合同，不能越过汇报线。
 
 一次性 approval 精确绑定 case、action、target、case version/digest、business generation、
 target seat version/digest 和有效期。grant 与 issue 都重验当前 generation/seat，防止 case 往返后
@@ -500,12 +516,21 @@ ledger tail 中占用冻结 seat；尾态同时核对 `max_wip`，不允许通�
 
 ### Message
 
-`message` 支持 `info`、`question`、`request`、`handoff`。正文硬上限 2 KiB；结构化引用使用
+`message` 支持 `info`、`question`、`request`、`handoff`、`directive`。正文硬上限 2 KiB；结构化引用使用
 `--ref-file/--ref-case/--ref-message/--ref-event`，prepared 到 ack 共用稳定 message ID。它可以关联 case、thread 和原文引用，
 但所有 message/delivery/ack 事件都从 case 业务投影中排除。接收方需要承接工作时，必须另行合法 `issue`。
-行动型 `question|request|handoff` 的总线信封必须携带精确 `hq message ack --message <message-id>`；
+行动型 `question|request|handoff|directive` 的总线信封必须携带精确 `hq message ack --message <message-id>`；
 接收方读懂后写入 durable Ack。Ack 只证明收到，不接管业务所有权；在 Ack 前，reaper 同时保留发送方与
 接收方 runtime。普通 `info` 不需要 Ack。
+
+`directive` 是绑定当前 active Assignment Contract 的指令通道：recipient、case version/digest、assignment、issuer、
+reviewer、acceptor 必须完全一致，且 actor 必须属于冻结 authority；它仍是 projection-neutral，不能修改合同。
+调用形式为 `hq message --to <direct-report> --case <active-case-id> --kind directive --urgency urgent --text <加急指令>`。
+`--urgency urgent` 固定选择 `wakeup + next-turn`，绕过普通连续唤醒预算并拒绝 quiet/inject。next-turn 表示当前模型
+回合完成后的安全边界，不是 Ctrl-C 或工具调用中断；因此不可逆的外部副作用仍需 Agent 自身按安全设计控制。
+已 sent 但未 ack 的 urgent directive 由 gateway 以稳定 message/basis 做有界 durable nudge，最终沿 recipient 的
+`reports_to` 升级；watchdog 不代 ack、不改 case、不改 assignment。需要改变 objective/acceptance/constraints 时
+必须使用 `case revise --supersede-active`。
 
 业务叙述字段 `next_action`、`note`、`verification` 以及 return/close reason 与 message
 使用同一个合法 UTF-8 2 KiB byte 级硬上限，仍保持单行。标识符、标签、结构化
@@ -755,7 +780,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.1.5 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.0 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

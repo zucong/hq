@@ -21,6 +21,9 @@ const (
 	deliveryTargetNextTurn = "next-turn"
 	deliveryTargetNextStep = "next-step"
 
+	messageUrgencyNormal = "normal"
+	messageUrgencyUrgent = "urgent"
+
 	defaultDeliveryBundleItems       = 8
 	defaultDeliveryBundleBytes       = 16 * 1024
 	defaultAssignmentAcceptTimeout   = 2 * time.Minute
@@ -56,6 +59,7 @@ type DeliveryContextItem struct {
 	MessageID   string   `json:"message_id"`
 	From        string   `json:"from"`
 	Kind        string   `json:"kind"`
+	Urgency     string   `json:"urgency"`
 	Text        string   `json:"text"`
 	CaseID      string   `json:"case_id,omitempty"`
 	ThreadID    string   `json:"thread_id,omitempty"`
@@ -202,12 +206,36 @@ func (c Config) assignmentAcceptTimeout() time.Duration {
 }
 
 func messageNeedsAction(kind string) bool {
-	return kind == "question" || kind == "request" || kind == "handoff"
+	return kind == "question" || kind == "request" || kind == "handoff" || kind == "directive"
 }
 
-func selectMessageDelivery(requested, kind string, state deliveryRuntimeState, spent int, policy DeliveryPolicy) (string, string, error) {
+func effectiveMessageUrgency(value string) string {
+	if value == "" {
+		return messageUrgencyNormal
+	}
+	return value
+}
+
+func validMessageUrgency(value string) bool {
+	return value == messageUrgencyNormal || value == messageUrgencyUrgent
+}
+
+func selectMessageDelivery(requested, kind, urgency string, state deliveryRuntimeState, spent int, policy DeliveryPolicy) (string, string, error) {
 	if !validDeliveryRequestMode(requested) {
 		return "", "", fmt.Errorf("--delivery 只能是 auto|wakeup|quiet|inject")
+	}
+	urgency = effectiveMessageUrgency(urgency)
+	if !validMessageUrgency(urgency) {
+		return "", "", fmt.Errorf("--urgency 只能是 normal|urgent")
+	}
+	if urgency == messageUrgencyUrgent && kind != "directive" {
+		return "", "", fmt.Errorf("--urgency urgent 只允许用于绑定 active assignment 的 directive")
+	}
+	if urgency == messageUrgencyUrgent {
+		if requested == deliveryModeQuiet || requested == deliveryModeInject {
+			return "", "", fmt.Errorf("urgent 消息必须在下一安全回合主动唤醒；--delivery 只能省略、auto 或 wakeup")
+		}
+		return deliveryModeWakeup, "urgent-next-turn", nil
 	}
 	mode, reason := requested, "caller-requested"
 	if mode == deliveryModeAuto {
@@ -617,7 +645,7 @@ func (a *App) appendDeliveryContextRecord(batch *deliveryContextBatch, record *d
 		messageID = origin.ID
 	}
 	item := DeliveryContextItem{
-		MessageID: messageID, From: origin.ActorLabel, Kind: origin.MessageKind, Text: origin.Message,
+		MessageID: messageID, From: origin.ActorLabel, Kind: origin.MessageKind, Urgency: effectiveMessageUrgency(origin.Urgency), Text: origin.Message,
 		CaseID: origin.CaseID, ThreadID: origin.ThreadID, ReplyTo: origin.ReplyTo,
 		RefFiles: append([]string(nil), origin.RefFiles...), RefCases: append([]string(nil), origin.RefCases...),
 		RefMessages: append([]string(nil), origin.RefMessages...), RefEvents: append([]string(nil), origin.RefEvents...),
@@ -1175,4 +1203,5 @@ func copyDeliveryEnvelope(dst *Event, origin Event) {
 	dst.Recipient, dst.RecipientLabel = origin.Recipient, origin.RecipientLabel
 	dst.DeliveryID, dst.PayloadDigest = origin.DeliveryID, origin.PayloadDigest
 	dst.DeliveryMode, dst.DeliveryTarget, dst.DeliveryReason = origin.DeliveryMode, origin.DeliveryTarget, origin.DeliveryReason
+	dst.Urgency = origin.Urgency
 }

@@ -62,7 +62,8 @@ func (a *App) cmdMessage(args []string) error {
 	fs := newLeafParser("message")
 	fs.SetOutput(a.Err)
 	target := fs.String("to", "", "recipient")
-	kind := fs.String("kind", "", "info|question|request|handoff")
+	kind := fs.String("kind", "", "info|question|request|handoff|directive")
+	urgency := fs.String("urgency", messageUrgencyNormal, "normal|urgent")
 	caseID := fs.String("case", "", "optional case_id")
 	body := fs.String("text", "", "消息正文")
 	refFiles := fs.StringSlice("ref-file", nil, "引用文件")
@@ -89,11 +90,24 @@ func (a *App) cmdMessage(args []string) error {
 	}
 	cleanKind := strings.TrimSpace(*kind)
 	if !validMessageKind(cleanKind) {
-		return fmt.Errorf("--kind 只能是 info|question|request|handoff")
+		return fmt.Errorf("--kind 只能是 info|question|request|handoff|directive")
 	}
 	requestedDelivery := strings.TrimSpace(*delivery)
 	if !validDeliveryRequestMode(requestedDelivery) {
 		return fmt.Errorf("--delivery 只能是 auto|wakeup|quiet|inject")
+	}
+	cleanUrgency := strings.TrimSpace(*urgency)
+	if !validMessageUrgency(cleanUrgency) {
+		return fmt.Errorf("--urgency 只能是 normal|urgent")
+	}
+	if cleanUrgency == messageUrgencyUrgent && cleanKind != "directive" {
+		return fmt.Errorf("--urgency urgent 只允许与 --kind directive 一起使用，以绑定 active assignment 和冻结 authority；普通消息请删除 --urgency urgent")
+	}
+	if cleanUrgency == messageUrgencyUrgent {
+		if fs.Changed("delivery") && requestedDelivery != deliveryModeAuto && requestedDelivery != deliveryModeWakeup {
+			return fmt.Errorf("urgent 消息必须在下一安全回合主动唤醒；请删除 --delivery，或改为 --delivery wakeup")
+		}
+		requestedDelivery = deliveryModeWakeup
 	}
 	runtimeState := deliveryRuntimeIdle
 	if requestedDelivery == deliveryModeAuto {
@@ -141,7 +155,7 @@ func (a *App) cmdMessage(args []string) error {
 			return err
 		}
 	}
-	commandID := stableCommandID("message", actor.Name, targetRule.Name, cleanCase, cleanKind, cleanThread, cleanReply, cleanBody,
+	commandID := stableCommandID("message", actor.Name, targetRule.Name, cleanCase, cleanKind, cleanUrgency, cleanThread, cleanReply, cleanBody,
 		strings.Join(files, "\x1f"), strings.Join(cases, "\x1f"), strings.Join(messages, "\x1f"), strings.Join(events, "\x1f"), requestedDelivery)
 	messageID := stableMessageID(commandID)
 	digest := requestDigest("message", commandID, messageID)
@@ -209,14 +223,32 @@ func (a *App) cmdMessage(args []string) error {
 			return Event{}, err
 		}
 		event.Recipient, event.RecipientLabel = targetRule.Name, targetRule.Label
-		event.MessageID, event.MessageKind, event.Message = messageID, cleanKind, cleanBody
+		event.MessageID, event.MessageKind, event.Urgency, event.Message = messageID, cleanKind, cleanUrgency, cleanBody
 		event.RefFiles, event.RefCases, event.RefMessages, event.RefEvents = files, cases, messages, events
 		event.ThreadID, event.ReplyTo = cleanThread, cleanReply
-		mode, reason, err := selectMessageDelivery(requestedDelivery, cleanKind, runtimeState, ledger.deliveryBudgetSpent(targetRule.Name), policy)
+		if cleanKind == "directive" {
+			if cleanCase == "" {
+				return Event{}, fmt.Errorf("directive 必须使用 --case 绑定当前 active assignment；普通补充说明请使用 --kind request")
+			}
+			matches := make([]*caseAssignment, 0, 1)
+			for _, assignment := range ledger.activeAssignments(cleanCase) {
+				if assignment.Recipient == targetRule.Name &&
+					(actor.Name == assignment.Issuer || actor.Name == assignment.Reviewer || actor.Name == assignment.Acceptor) {
+					matches = append(matches, assignment)
+				}
+			}
+			if len(matches) != 1 {
+				return Event{}, conflictf("directive 必须唯一绑定 recipient=%s 在 case=%s 上的 active assignment，当前匹配=%d；运行 `hq assignment list --case %s` 核验。若目标、验收或约束发生变化，不要用 message，改由冻结 issuer 运行 `hq case revise --id %s --version N --title TEXT --objective TEXT --acceptance TEXT --constraints TEXT --priority P0 --source PATH --supersede-active --next TEXT`", targetRule.Name, cleanCase, len(matches), cleanCase, cleanCase)
+			}
+			assignment := matches[0]
+			event.CaseVersion, event.CaseDigest = assignment.CaseVersion, assignment.CaseDigest
+			copyAssignmentStateBinding(&event, assignment)
+		}
+		mode, reason, err := selectMessageDelivery(requestedDelivery, cleanKind, cleanUrgency, runtimeState, ledger.deliveryBudgetSpent(targetRule.Name), policy)
 		if err != nil {
 			return Event{}, err
 		}
-		if !targetRule.CanManageStaff && targetRule.ApprovalRef != "" && !ledger.hasEverReceivedCase(targetRule.Name) {
+		if cleanUrgency != messageUrgencyUrgent && !targetRule.CanManageStaff && targetRule.ApprovalRef != "" && !ledger.hasEverReceivedCase(targetRule.Name) {
 			mode, reason = deliveryModeInject, "recipient-awaiting-first-manager-case"
 		}
 		targetPrimitive, _, _ := deliveryModePrimitives(mode)
@@ -236,7 +268,7 @@ func (a *App) cmdMessage(args []string) error {
 	originFenceHeld = false
 	prepared := result.Event
 	if a.DryRun {
-		return a.output(prepared, fmt.Sprintf("DRY-RUN：message=%s kind=%s → %s delivery=%s", prepared.MessageID, prepared.MessageKind, prepared.Recipient, prepared.DeliveryID))
+		return a.output(prepared, fmt.Sprintf("DRY-RUN：message=%s kind=%s urgency=%s → %s delivery=%s", prepared.MessageID, prepared.MessageKind, effectiveMessageUrgency(prepared.Urgency), prepared.Recipient, prepared.DeliveryID))
 	}
 	outcome, deliveryErr := a.processDelivery(prepared, "")
 	if deliveryErr != nil {
@@ -252,7 +284,7 @@ func (a *App) cmdMessage(args []string) error {
 		}
 		return a.output(outcome, fmt.Sprintf("message=%s 已记账并排队；recipient=%s mode=%s wakeup=false reason=%s；%s；delivery=%s", prepared.MessageID, targetRule.Name, outcome.DeliveryMode, prepared.DeliveryReason, detail, prepared.DeliveryID))
 	}
-	return a.output(outcome, fmt.Sprintf("message=%s 已送达；recipient=%s kind=%s mode=%s wakeup=%t delivery=%s", prepared.MessageID, targetRule.Name, cleanKind, outcome.DeliveryMode, outcome.Wakeup, prepared.DeliveryID))
+	return a.output(outcome, fmt.Sprintf("message=%s 已送达；recipient=%s kind=%s urgency=%s mode=%s wakeup=%t delivery=%s", prepared.MessageID, targetRule.Name, cleanKind, cleanUrgency, outcome.DeliveryMode, outcome.Wakeup, prepared.DeliveryID))
 }
 
 func (a *App) cmdMessageAck(args []string) error {

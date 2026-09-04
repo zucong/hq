@@ -237,7 +237,7 @@ Agent 类型和权限模式。
 	caseCommand.AddCommand(
 		leaf("create", "创建唯一 project root 或其子 case", "case", "create"),
 		leaf("escalate", "经理创建返工子 case 并固定上交直属上级；支持已接单的直属上级 assignment", "case", "escalate"),
-		leaf("revise", "追加 case 规格新版本", "case", "revise"),
+		leaf("revise", "追加 case 规格新版本；可原子替换在途 assignment", "case", "revise"),
 		leaf("show", "查看事项", "case", "show"),
 	)
 	root.AddCommand(caseCommand)
@@ -320,7 +320,8 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 		addString("delivery", "固定为 wakeup；case 委派不可静默")
 	case "message":
 		addString("to", "接收方 agent（必填）")
-		addString("kind", "info|question|request|handoff（必填）")
+		addString("kind", "info|question|request|handoff|directive（必填）")
+		addString("urgency", "normal|urgent；urgent 仅用于 directive，固定下一安全回合主动唤醒且不受普通 wake budget 降档")
 		addString("case", "可选 case_id")
 		addString("text", "消息正文（UTF-8 硬上限 2 KiB；必填）")
 		f.StringSlice("ref-file", nil, "引用文件；可重复")
@@ -398,6 +399,10 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 		addString("source", "权威来源路径[#定位]（必填）")
 		addString("owner", "禁止；revise 不得改变 owner")
 		addString("version", "新版本号（必填）")
+		addBool("supersede-active", "原子废止当前 assignment，并向同一直属员工签发新版本")
+		addString("next", "--supersede-active 时必填；新 assignment 下一步")
+		addString("note", "--supersede-active 时可选；变更摘要")
+		addString("due", "--supersede-active 时可选；新 RFC3339 截止时间，省略则沿用仍有效的旧值")
 	case "case escalate":
 		addString("id", "新 escalation 子 case 的稳定 case_id（必填）")
 		addString("parent", "当前经理持有的父 case_id（必填）")
@@ -677,6 +682,10 @@ func validateConditionalFlags(cmd *cobra.Command, path ...string) error {
 		value, _ := cmd.Flags().GetString(name)
 		return strings.TrimSpace(value)
 	}
+	boolValue := func(name string) bool {
+		value, _ := cmd.Flags().GetBool(name)
+		return value
+	}
 	enum := func(name string, optional bool, values ...string) error {
 		value := stringValue(name)
 		if optional && value == "" {
@@ -718,6 +727,17 @@ func validateConditionalFlags(cmd *cobra.Command, path ...string) error {
 		for _, forbidden := range []string{"parent", "owner", "project"} {
 			if cmd.Flags().Changed(forbidden) {
 				return usagef("case revise 不接受 --%s；lineage、owner 和唯一 project 不可由 revise 改写", forbidden)
+			}
+		}
+		if boolValue("supersede-active") {
+			if stringValue("next") == "" {
+				return usagef("--supersede-active 会原子生成 replacement assignment，因此必须提供 --next TEXT")
+			}
+		} else {
+			for _, activeOnly := range []string{"next", "note", "due"} {
+				if cmd.Flags().Changed(activeOnly) {
+					return usagef("--%s 仅与 --supersede-active 一起使用；普通规格修订请删除该参数", activeOnly)
+				}
 			}
 		}
 	case "case escalate":
@@ -764,11 +784,23 @@ func validateConditionalFlags(cmd *cobra.Command, path ...string) error {
 			return usagef("case 委派固定使用 --delivery wakeup；不能降档为 %q", stringValue("delivery"))
 		}
 	case "message":
-		if err := enum("kind", false, "info", "question", "request", "handoff"); err != nil {
+		if err := enum("kind", false, "info", "question", "request", "handoff", "directive"); err != nil {
+			return err
+		}
+		if err := enum("urgency", true, "normal", "urgent"); err != nil {
 			return err
 		}
 		if err := enum("delivery", true, "auto", "wakeup", "quiet", "inject"); err != nil {
 			return err
+		}
+		if stringValue("kind") == "directive" && stringValue("case") == "" {
+			return usagef("--kind directive 必须使用 --case CASE_ID 绑定 active assignment；如需修改 objective/acceptance/constraints，请使用 hq case revise --supersede-active")
+		}
+		if stringValue("urgency") == messageUrgencyUrgent && stringValue("kind") != "directive" {
+			return usagef("--urgency urgent 只允许与 --kind directive 一起使用，以绑定 active assignment 和冻结 authority；普通消息请删除 --urgency urgent")
+		}
+		if stringValue("urgency") == messageUrgencyUrgent && cmd.Flags().Changed("delivery") && stringValue("delivery") != deliveryModeAuto && stringValue("delivery") != deliveryModeWakeup {
+			return usagef("--urgency urgent 固定在下一安全回合主动唤醒；请删除 --delivery，或使用 --delivery wakeup")
 		}
 	case "project list":
 		if status := strings.ToLower(stringValue("status")); status != "" && status != "active" && status != "review" && status != "blocked" && status != "closed" {
@@ -778,7 +810,7 @@ func validateConditionalFlags(cmd *cobra.Command, path ...string) error {
 			return usagef("--priority 只能是 P0|P1|P2|unset，实际=%q", stringValue("priority"))
 		}
 	case "assignment list":
-		return enum("status", true, "issued", "accepted", "submitted", "rework", "completed", "reported", "returned")
+		return enum("status", true, "issued", "accepted", "submitted", "rework", "completed", "reported", "returned", "superseded")
 	case "delivery resolve":
 		return enum("outcome", false, "delivered", "not-delivered")
 	case "nudge reconcile":

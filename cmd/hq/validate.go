@@ -87,8 +87,10 @@ func validateEventShortFields(event Event) error {
 		{"approval_status", event.ApprovalStatus}, {"approval_mode", event.ApprovalMode},
 		{"authorization_type", event.AuthorizationType}, {"issuer", event.Issuer},
 		{"captured_by", event.CapturedBy},
-		{"priority", event.Priority}, {"message_kind", event.MessageKind}, {"message_id", event.MessageID},
+		{"priority", event.Priority}, {"message_kind", event.MessageKind}, {"urgency", event.Urgency}, {"message_id", event.MessageID},
 		{"thread_id", event.ThreadID}, {"reply_to", event.ReplyTo},
+		{"supersedes_assignment_event_id", event.SupersedesAssignmentEventID},
+		{"supersedes_assignment_id", event.SupersedesAssignmentID}, {"replacement_assignment_id", event.ReplacementAssignmentID},
 	}
 	for _, field := range fields {
 		if strings.ContainsAny(field.value, "\r\n") {

@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const assignmentContractVersion = 2
+const (
+	assignmentContractVersion        = 2
+	revisedAssignmentContractVersion = 3
+)
 
 func normalizeAssignmentDue(value string) (string, error) {
 	clean := strings.TrimSpace(value)
@@ -23,32 +26,34 @@ func normalizeAssignmentDue(value string) (string, error) {
 }
 
 type AssignmentView struct {
-	AssignmentID         string `json:"assignment_id"`
-	AssignmentEventID    string `json:"assignment_event_id"`
-	StatusEventID        string `json:"status_event_id,omitempty"`
-	StatusUpdatedAt      string `json:"status_updated_at,omitempty"`
-	AssignmentDigest     string `json:"assignment_digest,omitempty"`
-	ContractVersion      int    `json:"contract_version"`
-	AssigneeSeatVersion  int    `json:"assignee_seat_version,omitempty"`
-	AssigneeSeatDigest   string `json:"assignee_seat_digest,omitempty"`
-	RoleCardID           string `json:"role_card_id,omitempty"`
-	RoleCardVersion      int    `json:"role_card_version,omitempty"`
-	RoleCardDigest       string `json:"role_card_digest,omitempty"`
-	RoleCardManualPath   string `json:"role_card_manual_path,omitempty"`
-	CaseID               string `json:"case_id"`
-	CaseVersion          int    `json:"case_version"`
-	CaseDigest           string `json:"case_digest,omitempty"`
-	Project              string `json:"project,omitempty"`
-	Issuer               string `json:"issuer"`
-	Assignee             string `json:"assignee"`
-	Reviewer             string `json:"reviewer"`
-	Acceptor             string `json:"acceptor"`
-	DueAt                string `json:"due_at,omitempty"`
-	Status               string `json:"status"`
-	DeliveryID           string `json:"delivery_id,omitempty"`
-	ActivationStatus     string `json:"activation_status,omitempty"`
-	ActivationAttempts   int    `json:"activation_attempts,omitempty"`
-	ActivationNextAction string `json:"activation_next_action,omitempty"`
+	AssignmentID             string `json:"assignment_id"`
+	AssignmentEventID        string `json:"assignment_event_id"`
+	StatusEventID            string `json:"status_event_id,omitempty"`
+	StatusUpdatedAt          string `json:"status_updated_at,omitempty"`
+	AssignmentDigest         string `json:"assignment_digest,omitempty"`
+	ContractVersion          int    `json:"contract_version"`
+	SupersedesAssignmentID   string `json:"supersedes_assignment_id,omitempty"`
+	SupersededByAssignmentID string `json:"superseded_by_assignment_id,omitempty"`
+	AssigneeSeatVersion      int    `json:"assignee_seat_version,omitempty"`
+	AssigneeSeatDigest       string `json:"assignee_seat_digest,omitempty"`
+	RoleCardID               string `json:"role_card_id,omitempty"`
+	RoleCardVersion          int    `json:"role_card_version,omitempty"`
+	RoleCardDigest           string `json:"role_card_digest,omitempty"`
+	RoleCardManualPath       string `json:"role_card_manual_path,omitempty"`
+	CaseID                   string `json:"case_id"`
+	CaseVersion              int    `json:"case_version"`
+	CaseDigest               string `json:"case_digest,omitempty"`
+	Project                  string `json:"project,omitempty"`
+	Issuer                   string `json:"issuer"`
+	Assignee                 string `json:"assignee"`
+	Reviewer                 string `json:"reviewer"`
+	Acceptor                 string `json:"acceptor"`
+	DueAt                    string `json:"due_at,omitempty"`
+	Status                   string `json:"status"`
+	DeliveryID               string `json:"delivery_id,omitempty"`
+	ActivationStatus         string `json:"activation_status,omitempty"`
+	ActivationAttempts       int    `json:"activation_attempts,omitempty"`
+	ActivationNextAction     string `json:"activation_next_action,omitempty"`
 }
 
 // frozenSeatContract is the immutable employee identity captured by an
@@ -241,6 +246,14 @@ func (s *ledgerState) validateCandidateSeatContinuity(cfg Config) error {
 }
 
 func assignmentContractDigest(event Event) string {
+	if event.SupersedesAssignmentID != "" || event.SupersedesAssignmentEventID != "" {
+		return requestDigest("assignment-contract-v3", event.AssignmentID, event.CaseID,
+			strconv.Itoa(event.CaseVersion), event.CaseDigest, event.Project,
+			event.AssignmentIssuer, event.Recipient, event.Reviewer, event.Acceptor, event.DueAt,
+			strconv.Itoa(event.AssigneeSeatVersion), event.AssigneeSeatDigest,
+			event.RoleCardID, strconv.Itoa(event.RoleCardVersion), event.RoleCardDigest, event.RoleCardManualPath,
+			event.SupersedesAssignmentEventID, event.SupersedesAssignmentID)
+	}
 	return requestDigest("assignment-contract-v2", event.AssignmentID, event.CaseID,
 		strconv.Itoa(event.CaseVersion), event.CaseDigest, event.Project,
 		event.AssignmentIssuer, event.Recipient, event.Reviewer, event.Acceptor, event.DueAt,
@@ -308,6 +321,17 @@ func validateAssignmentContractEvent(event Event, cfg Config) error {
 	if err := validateDigest("assignment_digest", event.AssignmentDigest); err != nil {
 		return err
 	}
+	if (event.SupersedesAssignmentEventID == "") != (event.SupersedesAssignmentID == "") {
+		return fmt.Errorf("replacement assignment 必须同时冻结 supersedes assignment event/id")
+	}
+	if event.SupersedesAssignmentEventID != "" {
+		if err := validateLedgerID("supersedes_assignment_event_id", event.SupersedesAssignmentEventID); err != nil {
+			return err
+		}
+		if err := validateLedgerID("supersedes_assignment_id", event.SupersedesAssignmentID); err != nil {
+			return err
+		}
+	}
 	if event.AssignmentIssuer != event.Actor {
 		return fmt.Errorf("assignment issuer 必须等于 issue actor")
 	}
@@ -365,6 +389,10 @@ func assignmentFromIssue(event Event, cfg Config) (*caseAssignment, error) {
 	if err := validateAssignmentContractEvent(event, cfg); err != nil {
 		return nil, err
 	}
+	contractVersion := assignmentContractVersion
+	if event.SupersedesAssignmentID != "" {
+		contractVersion = revisedAssignmentContractVersion
+	}
 	return &caseAssignment{
 		EventID: event.ID, StatusEventID: event.ID, AssignmentID: event.AssignmentID, AssignmentDigest: event.AssignmentDigest,
 		AssigneeSeatVersion: event.AssigneeSeatVersion, AssigneeSeatDigest: event.AssigneeSeatDigest,
@@ -373,8 +401,9 @@ func assignmentFromIssue(event Event, cfg Config) (*caseAssignment, error) {
 		CaseID: event.CaseID, CaseVersion: event.CaseVersion, CaseDigest: event.CaseDigest, Project: event.Project,
 		Issuer: event.AssignmentIssuer, Recipient: event.Recipient, Reviewer: event.Reviewer, ReviewerLabel: event.ReviewerLabel,
 		Acceptor: event.Acceptor, AcceptorLabel: event.AcceptorLabel,
-		DueAt: event.DueAt, Status: "issued", ContractVersion: assignmentContractVersion,
-		SubmissionGeneration: event.ID,
+		DueAt: event.DueAt, Status: "issued", ContractVersion: contractVersion,
+		SupersedesAssignmentID: event.SupersedesAssignmentID,
+		SubmissionGeneration:   event.ID,
 	}, nil
 }
 
@@ -404,8 +433,10 @@ func assignmentFromDeliveredIssue(event, origin Event, cfg Config) (*caseAssignm
 func (a *caseAssignment) view() AssignmentView {
 	return AssignmentView{
 		AssignmentID: a.AssignmentID, AssignmentEventID: a.EventID, StatusEventID: a.StatusEventID, AssignmentDigest: a.AssignmentDigest,
-		ContractVersion:     a.ContractVersion,
-		AssigneeSeatVersion: a.AssigneeSeatVersion, AssigneeSeatDigest: a.AssigneeSeatDigest,
+		ContractVersion:          a.ContractVersion,
+		SupersedesAssignmentID:   a.SupersedesAssignmentID,
+		SupersededByAssignmentID: a.SupersededByAssignmentID,
+		AssigneeSeatVersion:      a.AssigneeSeatVersion, AssigneeSeatDigest: a.AssigneeSeatDigest,
 		RoleCardID: a.RoleCardID, RoleCardVersion: a.RoleCardVersion,
 		RoleCardDigest: a.RoleCardDigest, RoleCardManualPath: a.RoleCardManualPath,
 		CaseID: a.CaseID, CaseVersion: a.CaseVersion, CaseDigest: a.CaseDigest, Project: a.Project,
@@ -476,7 +507,7 @@ func (a *App) cmdAssignmentList(args []string) error {
 	fs.SetOutput(a.Err)
 	caseID := fs.String("case", "", "case_id")
 	assignee := fs.String("assignee", "", "assignee agent")
-	status := fs.String("status", "", "issued|accepted|submitted|rework|completed|reported|returned")
+	status := fs.String("status", "", "issued|accepted|submitted|rework|completed|reported|returned|superseded")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -487,8 +518,8 @@ func (a *App) cmdAssignmentList(args []string) error {
 	}
 	cleanStatus := strings.TrimSpace(*status)
 	if cleanStatus != "" && cleanStatus != "issued" && cleanStatus != "accepted" && cleanStatus != "submitted" &&
-		cleanStatus != "rework" && cleanStatus != "completed" && cleanStatus != "reported" && cleanStatus != "returned" {
-		return fmt.Errorf("--status 只能是 issued/accepted/submitted/rework/completed/reported/returned")
+		cleanStatus != "rework" && cleanStatus != "completed" && cleanStatus != "reported" && cleanStatus != "returned" && cleanStatus != "superseded" {
+		return fmt.Errorf("--status 只能是 issued/accepted/submitted/rework/completed/reported/returned/superseded")
 	}
 	ledger, err := a.strictLedgerStateReadOnly()
 	if err != nil {

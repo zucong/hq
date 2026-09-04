@@ -150,9 +150,46 @@ func TestDocumentationContractNamesFormalReleaseArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := string(raw)
-	for _, want := range []string{"v1.1.5", "/tmp/hq-v1.1.5-release", "事件驱动的经理停车版本", "v1.1.4 委派感知的经理队列修复"} {
+	for _, want := range []string{"v1.2.0", "/tmp/hq-v1.2.0-release", "加急在途变更版本", "v1.1.5 事件驱动的经理停车"} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("RELEASE.md missing first-release contract %q", want)
+		}
+	}
+}
+
+func TestDocumentationContractPublishesUrgentDirectiveAndAtomicActiveRevision(t *testing.T) {
+	contracts := map[string][]string{
+		repositoryPath("README.md"): {
+			"message --to <direct-report> --case <active-case-id>", "--kind directive --urgency urgent",
+			"wakeup + next-turn", "case revise --supersede-active", "revision_pending",
+			"总部联络职责位只替换直属部门经理", "不会发送 Ctrl-C",
+		},
+		repositoryPath("docs", "DESIGN.md"): {
+			"assignment_superseded", "case_revised(vN+1)", "issue_prepared(v3)",
+			"--kind directive --urgency urgent", "沿 recipient 的", "不代 ack",
+		},
+		repositoryPath("docs", "RELEASE.md"): {
+			"v1.2.0 加急在途变更", "case revise --supersede-active", "两跳真实组织变更场景",
+		},
+	}
+	for path, wants := range contracts {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("%s missing urgent revision contract %q", path, want)
+			}
+		}
+	}
+	manager := AgentRule{Name: "manager", Nickname: "Manager", Department: "delivery", DepartmentLabel: "Delivery",
+		ReportsTo: "liaison", Responsibilities: []string{"manager:delivery"}, RoleCardID: "manager", RoleCardVersion: 1,
+		WorkstationPath: "delivery/staff/manager/v1", ActivationPolicy: activationAlways, MaxWIP: 8}
+	manual := string(agentRoleCardManual("Example", "example-hq", manager))
+	for _, want := range []string{"HQ URGENT DIRECTIVE", "--kind directive --urgency urgent", "case revise --supersede-active", "replacement assignment"} {
+		if !strings.Contains(manual, want) {
+			t.Fatalf("agent role manual missing urgent revision contract %q", want)
 		}
 	}
 }

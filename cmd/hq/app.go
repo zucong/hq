@@ -599,6 +599,14 @@ type CaseSpec struct {
 	projectExplicit                                                                  bool
 }
 
+type caseRevisionOptions struct {
+	SupersedeActive bool
+	Next            string
+	Note            string
+	Due             string
+	DueExplicit     bool
+}
+
 const maxCaseBodyRunes = 2000
 
 func validateCaseBody(name, value string, required bool) (string, error) {
@@ -641,7 +649,7 @@ func occupiedHQSpaceError(root *CaseState) error {
 	return conflictf("HQ space 已绑定唯一 project=%q root=%s，不允许第二个 root/project；%s", root.Project, root.ID, newHQSpaceGuidance())
 }
 
-func (a *App) parseCaseSpec(command string, args []string) (CaseSpec, string, error) {
+func (a *App) parseCaseSpec(command string, args []string) (CaseSpec, string, caseRevisionOptions, error) {
 	fs := newLeafParser(command)
 	fs.SetOutput(a.Err)
 	id := fs.String("id", "", "稳定 case_id")
@@ -656,36 +664,44 @@ func (a *App) parseCaseSpec(command string, args []string) (CaseSpec, string, er
 	source := fs.String("source", "", "权威来源")
 	owner := fs.String("owner", "", "初始负责人")
 	versionText := fs.String("version", "", "版本")
+	var supersedeActive *bool
+	var next, note, due *string
+	if command == "case revise" {
+		supersedeActive = fs.Bool("supersede-active", false, "原子替换 active assignment")
+		next = fs.String("next", "", "replacement assignment 下一步")
+		note = fs.String("note", "", "变更摘要")
+		due = fs.String("due", "", "replacement assignment 截止时间")
+	}
 	if err := fs.Parse(args); err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	projectExplicit := fs.Changed("project")
 	cleanID := strings.TrimSpace(*id)
 	if err := validateCaseID(cleanID); err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	cleanTitle, err := validateShortText("title", *title, true)
 	if err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	cleanProject, err := validateShortText("project", *project, false)
 	if err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	if projectExplicit && cleanProject == "" {
-		return CaseSpec{}, "", fmt.Errorf("--project 已显式提供时不得为空；若要继承或保留项目，请省略 --project")
+		return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("--project 已显式提供时不得为空；若要继承或保留项目，请省略 --project")
 	}
 	cleanObjective, err := validateCaseBody("objective", *objective, false)
 	if err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	cleanAcceptance, err := validateCaseBody("acceptance", *acceptance, false)
 	if err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	cleanConstraints, err := validateCaseBody("constraints", *constraints, false)
 	if err != nil {
-		return CaseSpec{}, "", err
+		return CaseSpec{}, "", caseRevisionOptions{}, err
 	}
 	cleanPriority := strings.ToUpper(strings.TrimSpace(*priority))
 	if cleanObjective == "" {
@@ -701,35 +717,55 @@ func (a *App) parseCaseSpec(command string, args []string) (CaseSpec, string, er
 		cleanPriority = "P1"
 	}
 	if cleanPriority != "P0" && cleanPriority != "P1" && cleanPriority != "P2" {
-		return CaseSpec{}, "", fmt.Errorf("--priority 只能是 P0/P1/P2")
+		return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("--priority 只能是 P0/P1/P2")
 	}
 	cleanSpec, err := normalizeRef(*specRef, a.HQRoot, false)
 	if err != nil {
-		return CaseSpec{}, "", fmt.Errorf("spec-ref：%w", err)
+		return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("spec-ref：%w", err)
 	}
 	if cleanSpec != "" && strings.ToLower(filepath.Ext(strings.Split(cleanSpec, "#")[0])) != ".md" {
-		return CaseSpec{}, "", fmt.Errorf("spec-ref 必须引用 Markdown")
+		return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("spec-ref 必须引用 Markdown")
 	}
 	cleanSource, err := normalizeRef(*source, a.HQRoot, true)
 	if err != nil {
-		return CaseSpec{}, "", fmt.Errorf("source：%w", err)
+		return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("source：%w", err)
 	}
 	version := 1
 	if strings.TrimSpace(*versionText) != "" {
 		version, err = strconv.Atoi(strings.TrimSpace(*versionText))
 		if err != nil || version < 1 {
-			return CaseSpec{}, "", fmt.Errorf("--version 必须是正整数")
+			return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("--version 必须是正整数")
 		}
 	}
 	spec := CaseSpec{CaseID: cleanID, ParentCaseID: strings.TrimSpace(*parent), Title: cleanTitle, Project: cleanProject,
 		Objective: cleanObjective, Acceptance: cleanAcceptance, Constraints: cleanConstraints, Priority: cleanPriority,
 		SpecRef: cleanSpec, SourceRef: cleanSource, Version: version, projectExplicit: projectExplicit}
 	spec.Digest = caseSpecDigest(spec)
-	return spec, strings.TrimSpace(*owner), nil
+	revision := caseRevisionOptions{}
+	if command == "case revise" {
+		revision.SupersedeActive = *supersedeActive
+		revision.DueExplicit = fs.Changed("due")
+		revision.Next, err = validateBusinessText("next", *next, revision.SupersedeActive)
+		if err != nil {
+			return CaseSpec{}, "", caseRevisionOptions{}, err
+		}
+		revision.Note, err = validateBusinessText("note", *note, false)
+		if err != nil {
+			return CaseSpec{}, "", caseRevisionOptions{}, err
+		}
+		revision.Due, err = normalizeAssignmentDue(*due)
+		if err != nil {
+			return CaseSpec{}, "", caseRevisionOptions{}, err
+		}
+		if !revision.SupersedeActive && (fs.Changed("next") || fs.Changed("note") || fs.Changed("due")) {
+			return CaseSpec{}, "", caseRevisionOptions{}, fmt.Errorf("--next/--note/--due 仅与 --supersede-active 一起使用")
+		}
+	}
+	return spec, strings.TrimSpace(*owner), revision, nil
 }
 
 func (a *App) cmdCaseCreate(args []string) error {
-	spec, requestedOwner, err := a.parseCaseSpec("case create", args)
+	spec, requestedOwner, _, err := a.parseCaseSpec("case create", args)
 	if err != nil {
 		return err
 	}
@@ -869,7 +905,7 @@ func (a *App) cmdCaseCreate(args []string) error {
 }
 
 func (a *App) cmdCaseRevise(args []string) error {
-	spec, requestedOwner, err := a.parseCaseSpec("case revise", args)
+	spec, requestedOwner, revision, err := a.parseCaseSpec("case revise", args)
 	if err != nil {
 		return err
 	}
@@ -878,6 +914,9 @@ func (a *App) cmdCaseRevise(args []string) error {
 	}
 	if spec.projectExplicit {
 		return fmt.Errorf("project identity 在唯一 root 创建时冻结；case revise 不接受 --project；%s", newHQSpaceGuidance())
+	}
+	if revision.SupersedeActive {
+		return a.cmdCaseReviseActive(spec, revision)
 	}
 	actor, err := a.actor()
 	if err != nil {
