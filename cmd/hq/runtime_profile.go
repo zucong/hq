@@ -264,6 +264,7 @@ func inspectLiveRuntimeProfile(ctx context.Context, reader HerdrAgentReader, cfg
 
 func runtimeProfileRecoveryEnvelope(rule AgentRule, expected, observed runtimeProfile, work runtimeRecoveryWork) string {
 	lines := []string{
+		runtimeProtocolLine(),
 		fmt.Sprintf("[HQ runtime recovery] trigger=runtime_profile_drift seat=%s previous_model=%s previous_effort=%s current_model=%s current_effort=%s。你仍是同一员工；模型运行参数修复不改变角色、权限边界、汇报线或任务合同。", rule.Name, observed.Model, observed.ReasoningEffort, expected.Model, expected.ReasoningEffort),
 		"旧聊天上下文不会被当作 durable 事实复制；只以当前 AGENTS.md、同一工位文件和 HQ durable ledger 为事实源。",
 	}
@@ -273,6 +274,9 @@ func runtimeProfileRecoveryEnvelope(rule AgentRule, expected, observed runtimePr
 	}
 	for _, assignment := range work.supervisedAssignments {
 		lines = append(lines, supervisedAssignmentRecoveryLine(assignment))
+	}
+	if isManagerResponsibilities(rule.Responsibilities) {
+		lines = append(lines, managerEventDrivenWaitRule)
 	}
 	for _, state := range work.cases {
 		lines = append(lines, fmt.Sprintf("ACTIVE_OWNED_CASE id=%s version=%d status=%s title=%q；先运行 `hq case show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。", state.ID, state.Version, state.Status, state.Title, state.ID, state.ID))

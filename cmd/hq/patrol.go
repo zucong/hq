@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const patrolReportVersion = 2
+const patrolReportVersion = 3
 
 type PatrolFinding struct {
 	Category   string   `json:"category"`
@@ -26,18 +26,19 @@ type PatrolFinding struct {
 }
 
 type PatrolReport struct {
-	Version        int             `json:"version"`
-	WorkspaceID    string          `json:"workspace_id,omitempty"`
-	WorkspaceLabel string          `json:"workspace_label"`
-	GraceMS        int64           `json:"grace_ms"`
-	Blocked        int             `json:"blocked"`
-	Drift          int             `json:"drift"`
-	Orphan         int             `json:"orphan"`
-	DeadCandidate  int             `json:"dead_candidate"`
-	Frozen         int             `json:"frozen"`
-	Stalled        int             `json:"stalled"`
-	Warnings       int             `json:"warnings"`
-	Findings       []PatrolFinding `json:"findings"`
+	Version           int             `json:"version"`
+	WorkspaceID       string          `json:"workspace_id,omitempty"`
+	WorkspaceLabel    string          `json:"workspace_label"`
+	GraceMS           int64           `json:"grace_ms"`
+	Blocked           int             `json:"blocked"`
+	Drift             int             `json:"drift"`
+	Orphan            int             `json:"orphan"`
+	DeadCandidate     int             `json:"dead_candidate"`
+	Frozen            int             `json:"frozen"`
+	Stalled           int             `json:"stalled"`
+	BusyWithoutAction int             `json:"busy_without_action"`
+	Warnings          int             `json:"warnings"`
+	Findings          []PatrolFinding `json:"findings"`
 }
 
 type PatrolRunner interface {
@@ -105,6 +106,9 @@ func (p *PatrolService) Run(ctx context.Context, cfg Config, hqRoot string, grac
 		}
 		if queueErr := addManagerQueuePatrolFindings(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); queueErr != nil {
 			return PatrolReport{}, fmt.Errorf("patrol manager queue 分析失败：%w", queueErr)
+		}
+		if parkingErr := addManagerParkingPatrolFindings(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); parkingErr != nil {
+			return PatrolReport{}, fmt.Errorf("patrol manager parking 分析失败：%w", parkingErr)
 		}
 		if progressErr := addAssignmentProgressPatrolFindings(&first, firstSnapshot, cfg, hqRoot, ledger, p.Store.NowTime()); progressErr != nil {
 			return PatrolReport{}, fmt.Errorf("patrol assignment progress 分析失败：%w", progressErr)
@@ -363,6 +367,8 @@ func addPatrolFinding(analysis *patrolAnalysis, finding PatrolFinding) {
 		analysis.report.Frozen++
 	case "stalled":
 		analysis.report.Stalled++
+	case "warning":
+		analysis.report.BusyWithoutAction++
 	}
 }
 
@@ -432,6 +438,40 @@ func addManagerQueuePatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnaps
 			Category: "stalled", ObjectID: "manager-queue:" + backlog.Manager, Agent: backlog.Manager,
 			SignalType: "idle_with_actionable_queue", Signals: signals,
 			Message: fmt.Sprintf("manager status=%s 但仍有 %d 项 durable 待办；当前最高优先级 case=%s status=%s basis=%s；纠正：%s", status, len(backlog.Items), item.CaseID, item.Status, backlog.BasisEventID, managerQueueAction(item)),
+		})
+	}
+	analysis.report.Warnings = len(analysis.report.Findings)
+	sortPatrolFindings(analysis.report.Findings)
+	return nil
+}
+
+func addManagerParkingPatrolFindings(analysis *patrolAnalysis, snapshot HerdrSnapshot, cfg Config, hqRoot string, ledger *ledgerState, now time.Time) error {
+	states, err := ledger.managerParkingStates(cfg)
+	if err != nil {
+		return err
+	}
+	warnAfter, _, _ := cfg.managerQueueWatchdogPolicy()
+	for _, state := range states {
+		status, statusErr := liveQueueTargetStatus(snapshot, cfg, hqRoot, state.Manager)
+		if statusErr != nil || status != "working" {
+			continue
+		}
+		selectedAt, err := parseOperationsTime("manager parking selected_at", state.SelectedAt)
+		if err != nil {
+			return err
+		}
+		if now.Sub(selectedAt) < warnAfter {
+			continue
+		}
+		signals := make([]string, 0, len(state.Items))
+		for _, item := range state.Items {
+			signals = append(signals, item.AssignmentID+":"+item.Status)
+		}
+		addPatrolFinding(analysis, PatrolFinding{
+			Category: "warning", ObjectID: "manager-parking:" + state.Manager, Agent: state.Manager,
+			SignalType: "manager_busy_without_action", Signals: signals,
+			Message: fmt.Sprintf("manager status=working，但当前只有 %d 项直属下属执行责任且没有 durable 经理动作，basis=%s；应结束当前回合并等待 HQ 事件唤醒，禁止 sleep、进程/Herdr 状态或产物轮询；HQ 不会自动中断可能仍有合法工作的 runtime",
+				len(state.Items), state.BasisEventID),
 		})
 	}
 	analysis.report.Warnings = len(analysis.report.Findings)
@@ -517,7 +557,7 @@ func (a *App) cmdPatrol(args []string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	}
-	if _, err := fmt.Fprintf(a.Out, "HQ patrol：workspace=%s blocked=%d stalled=%d drift=%d orphan=%d frozen=%d dead_candidate=%d\n", report.WorkspaceID, report.Blocked, report.Stalled, report.Drift, report.Orphan, report.Frozen, report.DeadCandidate); err != nil {
+	if _, err := fmt.Fprintf(a.Out, "HQ patrol：workspace=%s blocked=%d stalled=%d busy_without_action=%d drift=%d orphan=%d frozen=%d dead_candidate=%d\n", report.WorkspaceID, report.Blocked, report.Stalled, report.BusyWithoutAction, report.Drift, report.Orphan, report.Frozen, report.DeadCandidate); err != nil {
 		return err
 	}
 	for _, finding := range report.Findings {

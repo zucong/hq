@@ -106,7 +106,7 @@ func (work runtimeRecoveryWork) empty() bool {
 }
 
 func supervisedAssignmentRecoveryLine(assignment AssignmentView) string {
-	action := "下属仍持有执行权；不要接管或重复委派。核验 durable 状态后等待其正式 report，再按冻结验收合同 review。"
+	action := "下属仍持有执行权；不要接管或重复委派。核验 durable 状态后立即结束本回合，禁止 sleep、进程/Herdr 状态或产物轮询；等待 HQ 在正式 report 或异常升级时重新唤醒，再按冻结验收合同 review。"
 	if assignment.Status == "submitted" {
 		action = "已有正式 submission 待审；核验 durable 状态与产物后，按冻结验收合同显式 accept 或 return。"
 	}
@@ -118,6 +118,7 @@ func supervisedAssignmentRecoveryLine(assignment AssignmentView) string {
 func runtimeRecoveryEnvelope(rule AgentRule, policy RuntimeFallbackPolicy, work runtimeRecoveryWork) string {
 	var lines []string
 	lines = append(lines,
+		runtimeProtocolLine(),
 		fmt.Sprintf("[HQ runtime recovery] trigger=content_safeguard previous_kind=%s current_kind=%s seat=%s。你仍是同一员工；模型载体变化不改变角色、权限边界、汇报线或任务合同。", policy.FromKind, policy.ToKind, rule.Name),
 		"本恢复信封替代上方‘等待首个 case’指令。隐藏聊天记录不会跨模型复制；只以当前 AGENTS.md、同一工位文件和 HQ durable ledger 为事实源，不得凭空补写旧会话结论。",
 	)
@@ -128,6 +129,9 @@ func runtimeRecoveryEnvelope(rule AgentRule, policy RuntimeFallbackPolicy, work 
 	}
 	for _, assignment := range work.supervisedAssignments {
 		lines = append(lines, supervisedAssignmentRecoveryLine(assignment))
+	}
+	if isManagerResponsibilities(rule.Responsibilities) {
+		lines = append(lines, managerEventDrivenWaitRule)
 	}
 	for _, state := range work.cases {
 		lines = append(lines, fmt.Sprintf("ACTIVE_OWNED_CASE id=%s version=%d status=%s title=%q；先运行 `hq case show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。", state.ID, state.Version, state.Status, state.Title, state.ID, state.ID))

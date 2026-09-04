@@ -310,5 +310,21 @@ func (a *App) cmdIssue(args []string) error {
 		}
 		return deliveryErr
 	}
-	return a.output(outcome, fmt.Sprintf("case 已委派给 %s；case=%s@v%d event=%s delivery=%s", targetRule.Name, cleanCase, prepared.CaseVersion, prepared.ID, prepared.DeliveryID))
+	summary := fmt.Sprintf("case 已委派给 %s；case=%s@v%d event=%s delivery=%s", targetRule.Name, cleanCase, prepared.CaseVersion, prepared.ID, prepared.DeliveryID)
+	if a.Config.isManager(actor.Rule) {
+		ledger, ledgerErr := a.ledgerState()
+		if ledgerErr != nil {
+			directive := managerIssueInspectionDirective(cleanCase, prepared.AssignmentID, ledgerErr)
+			outcome.ActorDirective = &directive
+			summary += "；" + directive.text()
+			return a.output(outcome, summary)
+		}
+		directive, directiveErr := managerPostIssueDirective(ledger, a.Config, actor.Name, cleanCase, prepared.AssignmentID)
+		if directiveErr != nil {
+			directive = managerIssueInspectionDirective(cleanCase, prepared.AssignmentID, directiveErr)
+		}
+		outcome.ActorDirective = &directive
+		summary += "；" + directive.text()
+	}
+	return a.output(outcome, summary)
 }

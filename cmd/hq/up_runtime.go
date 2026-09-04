@@ -673,8 +673,12 @@ func startupEnvelopeWithBinary(rule AgentRule, ownerPrincipal, hqBinary string) 
 }
 
 func startupEnvelopeWithRuntime(rule AgentRule, ownerPrincipal, hqBinary, workstation string) string {
+	protocol := runtimeProtocolLine()
+	if isManagerResponsibilities(rule.Responsibilities) {
+		protocol += "\n" + managerEventDrivenWaitRule
+	}
 	if rule.ManualPath == "" {
-		return fmt.Sprintf("[HQ notification] WORKSTATION=%s 本信封只建立到岗运行态。请读取本工位 AGENTS.md，按职责边界到岗；本公司的唯一 HQ CLI 是 %s，不得搜索或调用其他公司、PATH 或 _harness 中的 hq。读完立即结束本回合并等待直属经理通过 hq issue 委派首个 durable case。在此之前不得处理平级或跨部门消息，不得运行任何 hq/herdr 业务命令，也不得发送报到、回铃或消息。HQ 会在后续唤醒 prompt 或 accept 输出中自动附带此前静默消息。", workstation, hqBinary)
+		return fmt.Sprintf("[HQ notification] WORKSTATION=%s 本信封只建立到岗运行态。请读取本工位 AGENTS.md，按职责边界到岗；本公司的唯一 HQ CLI 是 %s，不得搜索或调用其他公司、PATH 或 _harness 中的 hq。读完立即结束本回合并等待直属经理通过 hq issue 委派首个 durable case。在此之前不得处理平级或跨部门消息，不得运行任何 hq/herdr 业务命令，也不得发送报到、回铃或消息。HQ 会在后续唤醒 prompt 或 accept 输出中自动附带此前静默消息。\n%s", workstation, hqBinary, protocol)
 	}
 	reports := rule.ReportsTo
 	if reports == "" {
@@ -684,8 +688,8 @@ func startupEnvelopeWithRuntime(rule AgentRule, ownerPrincipal, hqBinary, workst
 	if rule.hasResponsibility(roleApprovalWitness) {
 		waitInstruction = "等待公司所有者的正式治理输入；你只能据此通过 HQ 建立或推进公司级事项，不得把普通 Herdr prompt 当作已批准的业务事实"
 	}
-	return fmt.Sprintf("[HQ notification] WORKSTATION=%s 本信封只建立到岗运行态。你是%s（agent=%s，部门=%s）；完整阅读岗位手册 %s；向 %s 汇报并只接受注册表授权的纵向指令。本公司的唯一 HQ CLI 是 %s，不得搜索或调用其他公司、PATH 或 _harness 中的 hq。读完立即结束本回合，%s；在首个 case 到达前不得处理平级或跨部门消息，不得运行 hq/herdr 业务命令，也不得发送报到、回铃或消息。HQ 会在后续唤醒 prompt 或 accept 输出中自动附带此前静默排队的 [HQ message]。",
-		workstation, rule.Nickname, rule.Name, rule.DepartmentLabel, rule.ManualPath, reports, hqBinary, waitInstruction)
+	return fmt.Sprintf("[HQ notification] WORKSTATION=%s 本信封只建立到岗运行态。你是%s（agent=%s，部门=%s）；完整阅读岗位手册 %s；向 %s 汇报并只接受注册表授权的纵向指令。本公司的唯一 HQ CLI 是 %s，不得搜索或调用其他公司、PATH 或 _harness 中的 hq。读完立即结束本回合，%s；在首个 case 到达前不得处理平级或跨部门消息，不得运行 hq/herdr 业务命令，也不得发送报到、回铃或消息。HQ 会在后续唤醒 prompt 或 accept 输出中自动附带此前静默排队的 [HQ message]。\n%s",
+		workstation, rule.Nickname, rule.Name, rule.DepartmentLabel, rule.ManualPath, reports, hqBinary, waitInstruction, protocol)
 }
 
 func exactStartedAgentMatch(snapshot HerdrSnapshot, workspaceID string, rule AgentRule, hqRoot string, created HerdrTabCreated) (bool, string) {

@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.1.4 已正式发布；本文定义当前正式合同**
+状态：**v1.1.5 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -233,6 +233,11 @@ Config
 Role Card、Employee Seat 和 Assignment 是三层不同合同。角色卡冻结岗位行为、证据标准和边界；seat 冻结
 该员工的组织身份、独立 workstation、直属上级、激活策略和容量；issue 再把本次 case 与当时精确的
 seat version/digest、role card version/digest/manual 一并冻结。新增角色卡 version 不会静默改变在途 assignment。
+HQ 自身会演进的运行协议不能只依赖已冻结 Role Card。当前 binary 在 startup、runtime recovery 和关键命令结果中
+注入独立的 `HQ runtime protocol` 版本；它只规定如何读取 durable 状态、何时结束回合、何时等待事件唤醒等 harness
+动作，不覆盖员工人格、业务职责、证据标准、权限、汇报线或 assignment。新建公司的个人手册仍可收录当时的完整
+操作说明，但紧急控制面协议升级不要求批量改写既有员工 `AGENTS.md` 或制造新的角色版本；角色本身发生变化时仍必须
+创建并批准新的 Role Card version。
 `activation_policy=always` 供总裁秘书和部门经理常驻，永不被自动 reaper 关闭；专业下属通常使用
 `on_assignment`、`max_wip=1` 和有界 `keep_warm`，由正式 issue 激活，工作终态后自动休眠。
 `keep_warm` 只允许 `0s..1h`，省略等价于 `30s`；永久常驻必须改用 `always`。`manual` 席位仅在
@@ -639,6 +644,13 @@ watchdog 推动，父项不得并行要求提前 report；child `submitted` 时�
 普通 message、delivery/runtime 基础设施事件、sibling、另一棵树或非该经理签发的 assignment 均不能刷新 basis。
 因此执行守卫、review 守卫与父任务汇总守卫各自只有一个明确责任人，同时保留有界催办和向上升级。
 
+`issue` 成功后会在最新 ledger 上重新计算 issuer 的经理队列，并附加结构化 `actor_directive`。若仍有 review、经理
+自身 work 或 owned open case，返回 `continue_queue` 与精确动作；若只剩未消费的直属下属 assignment，返回
+`end_turn`，由经理结束当前回合而不是 `sleep`、查询进程/Herdr 状态或反复查看产物。child 的 report、blocked/
+needs-decision、投递异常或 progress escalation 是重新唤醒条件。`patrol` 复用 manager queue timeout，把只有监督责任、
+没有 actionable manager queue 却持续 working 的 seat 标为只读 `manager_busy_without_action`；它不自动 interrupt，
+因为 Herdr 的 working 状态不能证明经理没有在做合法的独立规划。
+
 独立的 closure queue watchdog 处理验收与销账之间的控制面缺口。它只从严格重放结果选择
 `accepted|finding_accepted`、无 active assignment、目标无未收敛 workflow delivery、所有直属 child 已
 `closed` 的当前 post-order 叶节点；`open|blocked|needs_decision` 不进入候选。最早候选的 status event 是稳定
@@ -743,7 +755,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.1.4 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.5 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

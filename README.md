@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.1.4 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.1.5 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -593,6 +593,12 @@ trigger=assignment_progress` 指示其只从原 assignment、工位文件和 led
 该执行或 review 闭环期间暂不重复催报；child 一旦 submitted 就直接成为经理的最高优先级 review 项。全部相关
 child 收敛后，父项以最近一次真实 child 业务 transition 重新开始 stall 计时，再要求经理汇总 report。普通 message、
 投递维护和 runtime 事件不能伪造这一进展；其他 root、sibling 或非该经理签发的工作也不能刷新 basis。
+经理成功执行 `hq issue` 后，HQ 会立即重放最新队列并返回结构化 `actor_directive`：还有可执行 durable 事项时为
+`continue_queue` 并给出精确下一步；只有尚在执行的直属下属 assignment、没有待审 submission 或其他经理动作时为
+`end_turn`。后者要求经理立即结束当前回合，禁止使用 `sleep`、进程查询、Herdr 状态读取或循环查看产物来轮询下属；
+submission、blocked/needs-decision、投递异常和执行升级会通过现有 durable 回铃重新唤醒经理。`patrol` 会把超过同一
+queue timeout 仍处于 working 的这种 runtime 报告为 `manager_busy_without_action`，但不会自动按键或中断可能仍在进行
+合法独立工作的经理。
 只有目标精确在岗且 Herdr 状态为 `idle|done`，当前最高优先级待办又超过
 `manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。该项计算出的业务 basis event
 作为稳定去重依据；提醒至少间隔一个 stall timeout，最多 `max_manager_queue_nudges` 次。最后一次提醒后仍超过
@@ -1003,7 +1009,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.1.4 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.5 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证

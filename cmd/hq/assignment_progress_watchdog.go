@@ -104,6 +104,7 @@ func assignmentProgressUncertainEscalationMessage(backlog AssignmentProgressBack
 
 func assignmentProgressRuntimeRecoveryEnvelope(rule AgentRule, work runtimeRecoveryWork) string {
 	lines := []string{
+		runtimeProtocolLine(),
 		fmt.Sprintf("[HQ runtime recovery] trigger=assignment_progress seat=%s。你仍是同一员工；新 runtime 不改变角色、权限边界、汇报线或原任务合同。", rule.Name),
 		"本恢复信封替代上方‘等待首个 case’指令。隐藏聊天记录不会复制；只以当前 AGENTS.md、同一工位文件和 HQ durable ledger 为事实源。",
 	}
@@ -113,6 +114,9 @@ func assignmentProgressRuntimeRecoveryEnvelope(rule AgentRule, work runtimeRecov
 	}
 	for _, assignment := range work.supervisedAssignments {
 		lines = append(lines, supervisedAssignmentRecoveryLine(assignment))
+	}
+	if isManagerResponsibilities(rule.Responsibilities) {
+		lines = append(lines, managerEventDrivenWaitRule)
 	}
 	lines = append(lines, "继续未完成工作；完成后必须在原 case 运行 `hq report`，受阻必须 `hq report --result blocked`，不得仅结束 Agent 回合。")
 	return strings.Join(lines, "\n")

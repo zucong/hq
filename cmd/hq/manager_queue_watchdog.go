@@ -32,6 +32,21 @@ type ManagerQueueBacklog struct {
 	Items        []ManagerQueueItem `json:"items"`
 }
 
+type ManagerSupervisionItem struct {
+	AssignmentID  string `json:"assignment_id"`
+	CaseID        string `json:"case_id"`
+	Assignee      string `json:"assignee"`
+	Status        string `json:"status"`
+	StatusEventID string `json:"status_event_id"`
+}
+
+type ManagerParkingState struct {
+	Manager      string                   `json:"manager"`
+	BasisEventID string                   `json:"basis_event_id"`
+	SelectedAt   string                   `json:"selected_at"`
+	Items        []ManagerSupervisionItem `json:"items"`
+}
+
 func managerQueueItemLess(left, right ManagerQueueItem) bool {
 	leftPriority := managerQueueKindPriority(left.Kind)
 	rightPriority := managerQueueKindPriority(right.Kind)
@@ -239,6 +254,107 @@ func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, e
 		})
 	}
 	return backlogs, nil
+}
+
+// managerParkingStates returns managers whose only current responsibility is
+// supervision of already-issued direct-report work. There is deliberately no
+// business event for "parked": this is a deterministic projection of the
+// assignment ledger, so a child submission immediately turns into a review
+// queue item without another transition or polling loop.
+func (s *ledgerState) managerParkingStates(cfg Config) ([]ManagerParkingState, error) {
+	backlogs, err := s.managerQueueBacklogs(cfg)
+	if err != nil {
+		return nil, err
+	}
+	actionable := map[string]bool{}
+	for _, backlog := range backlogs {
+		actionable[backlog.Manager] = len(backlog.Items) != 0
+	}
+	type parkingAccumulator struct {
+		state    ManagerParkingState
+		sequence int64
+	}
+	byManager := map[string]*parkingAccumulator{}
+	for _, eventID := range s.assignmentList {
+		assignment := s.assignments[eventID]
+		if assignment == nil || assignment.Consumed || assignment.Issuer == "" || assignment.Status == "submitted" {
+			continue
+		}
+		rule, ok := cfg.exactRule(assignment.Issuer)
+		if !ok || !cfg.isManager(rule) || actionable[assignment.Issuer] {
+			continue
+		}
+		statusEvent, ok := s.events[assignment.StatusEventID]
+		if !ok {
+			return nil, fmt.Errorf("supervised assignment %s status=%s 缺少 status event=%s", assignment.AssignmentID, assignment.Status, assignment.StatusEventID)
+		}
+		if _, err := parseOperationsTime("manager parking status event.at", statusEvent.At); err != nil {
+			return nil, err
+		}
+		entry := byManager[assignment.Issuer]
+		if entry == nil {
+			entry = &parkingAccumulator{state: ManagerParkingState{Manager: assignment.Issuer}}
+			byManager[assignment.Issuer] = entry
+		}
+		entry.state.Items = append(entry.state.Items, ManagerSupervisionItem{
+			AssignmentID: assignment.AssignmentID, CaseID: assignment.CaseID, Assignee: assignment.Recipient,
+			Status: assignment.Status, StatusEventID: assignment.StatusEventID,
+		})
+		if entry.state.BasisEventID == "" || statusEvent.Sequence > entry.sequence {
+			entry.sequence = statusEvent.Sequence
+			entry.state.BasisEventID, entry.state.SelectedAt = statusEvent.ID, statusEvent.At
+		}
+	}
+	managers := make([]string, 0, len(byManager))
+	for manager := range byManager {
+		managers = append(managers, manager)
+	}
+	sort.Strings(managers)
+	states := make([]ManagerParkingState, 0, len(managers))
+	for _, manager := range managers {
+		state := byManager[manager].state
+		sort.Slice(state.Items, func(i, j int) bool {
+			if state.Items[i].CaseID == state.Items[j].CaseID {
+				return state.Items[i].AssignmentID < state.Items[j].AssignmentID
+			}
+			return state.Items[i].CaseID < state.Items[j].CaseID
+		})
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func managerPostIssueDirective(ledger *ledgerState, cfg Config, manager, issuedCase, issuedAssignment string) (ActorDirective, error) {
+	directive := ActorDirective{ProtocolVersion: agentRuntimeProtocolVersion, CaseID: issuedCase, AssignmentID: issuedAssignment}
+	backlogs, err := ledger.managerQueueBacklogs(cfg)
+	if err != nil {
+		return ActorDirective{}, err
+	}
+	for _, backlog := range backlogs {
+		if backlog.Manager != manager || len(backlog.Items) == 0 {
+			continue
+		}
+		item := backlog.Items[0]
+		directive.Action = "continue_queue"
+		directive.Reason = fmt.Sprintf("委派已完成，但仍有 %d 项 durable 经理待办，当前 case=%s status=%s", len(backlog.Items), item.CaseID, item.Status)
+		directive.NextAction = managerQueueAction(item)
+		return directive, nil
+	}
+	parking, err := ledger.managerParkingStates(cfg)
+	if err != nil {
+		return ActorDirective{}, err
+	}
+	for _, state := range parking {
+		if state.Manager != manager {
+			continue
+		}
+		directive.Action = "end_turn"
+		directive.Reason = fmt.Sprintf("当前仅有 %d 项直属下属执行责任，没有待审 submission 或其他已登记的经理动作", len(state.Items))
+		directive.WakeOn = []string{"submission", "blocked", "needs_decision", "delivery_failure", "progress_escalation"}
+		directive.Prohibited = []string{"sleep_polling", "process_polling", "herdr_status_polling", "artifact_polling"}
+		return directive, nil
+	}
+	return ActorDirective{}, fmt.Errorf("经理 %s 完成 issue 后既无 actionable queue，也无可核验的 active supervised assignment；拒绝猜测下一动作", manager)
 }
 
 func managerQueueAction(item ManagerQueueItem) string {

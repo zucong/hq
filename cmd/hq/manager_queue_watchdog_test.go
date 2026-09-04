@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -138,7 +140,10 @@ func TestManagerQueueRoutesDelegatedParentThroughChildLifecycle(t *testing.T) {
 	}
 
 	f.env.setActor(t, f.manager.Name, f.managerAt, testAgentCWD(f.config, f.env.root, f.manager.Name))
-	runTestCommand(t, f.env, "issue", "--case", f.childID, "--to", f.worker.Name, "--next", "Produce independently verifiable evidence")
+	issueOutput := runTestCommand(t, f.env, "issue", "--case", f.childID, "--to", f.worker.Name, "--next", "Produce independently verifiable evidence")
+	if !strings.Contains(issueOutput, "actor_directive=end_turn") || !strings.Contains(issueOutput, "不要 sleep/轮询") {
+		t.Fatalf("manager issue did not return an executable parking directive: %s", issueOutput)
+	}
 	events := scenarioEvents(t, f.env, f.config)
 	childIssue := latestCaseEvent(events, f.childID, "issue_sent")
 	f.env.setActor(t, f.worker.Name, f.workerAt, testAgentCWD(f.config, f.env.root, f.worker.Name))
@@ -172,11 +177,20 @@ func TestManagerQueueRoutesDelegatedParentThroughChildLifecycle(t *testing.T) {
 	if prompts := fakePromptCalls(control); len(prompts) != 0 {
 		t.Fatalf("active child execution caused a premature manager nudge: %v", prompts)
 	}
-	setFakeAgentStatus(control, f.worker.Name, "idle")
+	setFakeAgentStatus(control, f.manager.Name, "working")
 	store := NewStore(f.env.data)
 	store.Now = func() time.Time { return now }
 	patrol := &PatrolService{Herdr: control, Store: store}
 	patrolReport, err := patrol.Run(context.Background(), f.config, f.env.root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patrolReport.BusyWithoutAction != 1 || !patrolHasSignal(patrolReport, "manager_busy_without_action") {
+		t.Fatalf("working manager without an actionable queue was not diagnosed: %+v", patrolReport)
+	}
+	setFakeAgentStatus(control, f.manager.Name, "idle")
+	setFakeAgentStatus(control, f.worker.Name, "idle")
+	patrolReport, err = patrol.Run(context.Background(), f.config, f.env.root, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +269,38 @@ func TestManagerQueueRoutesDelegatedParentThroughChildLifecycle(t *testing.T) {
 	prompts := fakePromptCalls(control)
 	if len(prompts) != 1 || !strings.HasPrefix(prompts[0], "prompt "+f.manager.Name+" ") || !strings.Contains(prompts[0], f.parentID) {
 		t.Fatalf("parent synthesis was not nudged after the fresh stall window: %v", prompts)
+	}
+}
+
+func TestManagerIssueDirectiveContinuesAnotherDurableQueueItem(t *testing.T) {
+	f := newManagerDelegationQueueFixture(t)
+	secondChild := "QUEUE-DELEGATED-SECOND"
+	f.env.setActor(t, f.manager.Name, f.managerAt, testAgentCWD(f.config, f.env.root, f.manager.Name))
+	runTestCommand(t, f.env, "case", "create", "--id", secondChild, "--parent", f.parentID, "--title", "Produce second evidence", "--source", filepath.Join(f.env.root, f.manager.Department, "delegated-source.md"))
+	output := runTestCommand(t, f.env, "issue", "--case", f.childID, "--to", f.worker.Name, "--next", "Produce first evidence")
+	if !strings.Contains(output, "actor_directive=continue_queue") || !strings.Contains(output, secondChild) {
+		t.Fatalf("manager issue did not route to the remaining durable queue item: %s", output)
+	}
+}
+
+func TestManagerIssueJSONPublishesStructuredParkingDirective(t *testing.T) {
+	f := newManagerDelegationQueueFixture(t)
+	f.env.setActor(t, f.manager.Name, f.managerAt, testAgentCWD(f.config, f.env.root, f.manager.Name))
+	app := f.env.app(t)
+	app.JSON = true
+	var out bytes.Buffer
+	app.Out = &out
+	if err := app.run([]string{"issue", "--case", f.childID, "--to", f.worker.Name, "--next", "Produce evidence"}); err != nil {
+		t.Fatal(err)
+	}
+	var outcome DeliveryOutcome
+	if err := json.Unmarshal(out.Bytes(), &outcome); err != nil {
+		t.Fatalf("decode issue outcome: %v\n%s", err, out.String())
+	}
+	if outcome.ActorDirective == nil || outcome.ActorDirective.Action != "end_turn" ||
+		outcome.ActorDirective.ProtocolVersion != agentRuntimeProtocolVersion || len(outcome.ActorDirective.WakeOn) == 0 ||
+		len(outcome.ActorDirective.Prohibited) == 0 {
+		t.Fatalf("structured parking directive incomplete: %+v", outcome.ActorDirective)
 	}
 }
 

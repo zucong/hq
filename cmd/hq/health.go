@@ -72,7 +72,7 @@ func (h CompanyHealthReport) message() string {
 	if h.Gateway.NotStarted {
 		gateway = "not-started"
 	}
-	return fmt.Sprintf("patrol blocked=%d drift=%d orphan=%d dead_candidate=%d；gateway=%s；cases total=%d open=%d status=%s",
-		h.Patrol.Blocked, h.Patrol.Drift, h.Patrol.Orphan, h.Patrol.DeadCandidate,
+	return fmt.Sprintf("patrol blocked=%d stalled=%d busy_without_action=%d drift=%d orphan=%d dead_candidate=%d；gateway=%s；cases total=%d open=%d status=%s",
+		h.Patrol.Blocked, h.Patrol.Stalled, h.Patrol.BusyWithoutAction, h.Patrol.Drift, h.Patrol.Orphan, h.Patrol.DeadCandidate,
 		gateway, h.Ledger.Total, h.Ledger.Open, statusText)
 }

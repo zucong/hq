@@ -17,6 +17,7 @@ type DeliveryOutcome struct {
 	DeliveryTarget   string                `json:"delivery_target"`
 	Wakeup           bool                  `json:"wakeup"`
 	HQMessages       []DeliveryContextItem `json:"hq_messages,omitempty"`
+	ActorDirective   *ActorDirective       `json:"actor_directive,omitempty"`
 }
 
 type DeliveryOutcomeError struct {

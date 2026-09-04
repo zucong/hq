@@ -43,6 +43,9 @@ func TestManagerRoleManualPublishesDirectIssueAndAutomaticActivation(t *testing.
 		"saved permission",
 		"父项不会同时催你提前 report",
 		"普通 message 或 runtime 事件不能伪造进展",
+		"actor_directive=continue_queue",
+		"actor_directive=end_turn",
+		"禁止 sleep",
 	} {
 		if !strings.Contains(manual, want) {
 			t.Fatalf("manager role manual missing %q:\n%s", want, manual)
@@ -82,6 +85,8 @@ func TestCompanyAndRepositoryDocsPublishManagerAuthorizationMatrix(t *testing.T)
 		"saved deny",
 		"父 assignment 不重复催报",
 		"child submitted 后进入经理 review",
+		"manager_busy_without_action",
+		"停止轮询并等待事件唤醒",
 	} {
 		if !strings.Contains(handbook, want) {
 			t.Fatalf("company handbook missing %q:\n%s", want, handbook)

@@ -1,10 +1,23 @@
-# HQ v1.1.4 正式发布与安装
+# HQ v1.1.5 正式发布与安装
 
-HQ v1.1.4 是委派感知的经理队列修复版本：保留 v1.1.3 的全部 CLI、registry v3、event v3
-及公司实例合同，同时消除直属下属正常执行时父 assignment 被重复催办和错误升级的控制面缺陷。本文定义它的构建、
+HQ v1.1.5 是事件驱动的经理停车版本：保留 v1.1.4 的全部 CLI、registry v3、event v3
+及公司实例合同，同时让经理在委派后依据实时 durable 队列结束回合、由下属事件重新唤醒。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.1.5 事件驱动的经理停车
+
+- 经理成功 `issue` 后，HQ 重放最新队列并在文本及 JSON 中返回 `actor_directive=continue_queue|end_turn`；
+  `continue_queue` 给出最高优先级 durable 动作，`end_turn` 明确要求结束回合并禁止 sleep/进程/Herdr/产物轮询；
+- child submission、blocked/needs-decision、投递异常或执行升级复用现有 durable 回铃唤醒经理，不新增 wait/park
+  子命令，也不写第二套业务状态；
+- patrol v3 新增 `busy_without_action` 计数与 `manager_busy_without_action` finding，只读报告持续 working 的无动作
+  监督者；因为 working 仍可能包含合法独立规划，HQ 不自动中断 runtime；
+- startup、runtime-profile repair、content fallback 和 assignment-progress recovery 都注入独立 runtime protocol
+  version；协议升级不改写不可变个人 Role Card，也不改变其中冻结的角色、职责、人格和业务边界；
+- 回归覆盖单一下属停车、多项经理队列继续执行、结构化 JSON 指令、下属执行期间零误催、正式 submission 后单次 review
+  唤醒以及 busy-without-action 诊断。
 
 ## v1.1.4 委派感知的经理队列修复
 
@@ -54,7 +67,7 @@ HQ v1.1.4 是委派感知的经理队列修复版本：保留 v1.1.3 的全部 C
 
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.1.4 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 v1.1.5 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -71,8 +84,8 @@ fail closed，并由公司所有者明确从 v1.1.4 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.1.4 <完整小写commit> /tmp/hq-v1.1.4-release
-./scripts/release.sh verify /tmp/hq-v1.1.4-release
+./scripts/release.sh build v1.1.5 <完整小写commit> /tmp/hq-v1.1.5-release
+./scripts/release.sh verify /tmp/hq-v1.1.5-release
 ./scripts/test-gates.sh
 ```
 
@@ -113,6 +126,9 @@ HQ 源码不干净。`HQ_RELEASE_REHEARSAL=1` 只用于门禁中的可复现构�
     accept/return 命令的 durable nudge，次数耗尽后沿 reports_to 升级；重复扫描不得重复 Prompt，ambiguous
     必须冻结并要求 reconcile，且整个过程不得替经理验收或改变业务状态；混合队列必须保持
     `review > work > owned_case`，旧 open case 不得遮蔽待审或返工。
+    经理 issue 最后一个 child 时必须得到结构化 `end_turn`，仍有其他 durable 经理事项时必须得到
+    `continue_queue`；只有 active child 却持续 working 超时必须由 patrol 报告 `manager_busy_without_action`，
+    且不得自动 interrupt。
 14. 模拟 assignment 全部 completed、accepted case 长期未 close：closure queue watchdog 必须只选择无活动合同、
     无未决 workflow delivery、child 已 closed 的 `accepted|finding_accepted` 后序候选，向唯一 account_closer
     发送有界 durable nudge；`open|blocked|needs_decision` 必须排除，patrol 必须报告
@@ -180,6 +196,8 @@ incarnation，再对单一 agent `--retry-unknown`。不得批量重试或以裸
   ledger 防伪和 accept 后停止均通过测试。
 - 空闲经理的 durable actionable queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒、向上升级；同一
   queue basis 跨重启去重，系统不得自动 accept/return 或伪造质量结论。
+- 经理 issue 后必须得到与最新 durable 队列一致的 `continue_queue|end_turn`；事件等待期间不得要求模型轮询，
+  持续 working 的无动作监督者由 patrol v3 报告但不自动中断。
 - 已验收且满足 post-order 前置的 closure queue 必须由 patrol 标记 stalled，并由 gateway 有界提醒唯一
   account_closer；单轮明确逐项处理至多 8 个候选，同一 status event basis 跨重启去重，系统不得自动 close 或把
   blocked/needs_decision 当作完成。

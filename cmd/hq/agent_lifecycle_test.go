@@ -79,8 +79,18 @@ func TestStartupEnvelopeDistinguishesOwnerGovernanceFromManagerIssue(t *testing.
 		t.Fatal("test config missing worker")
 	}
 	workerEnvelope := startupEnvelopeWithBinary(worker, cfg.ownerPrincipal(), "/company/hq")
-	if !strings.Contains(workerEnvelope, "等待直属经理通过 hq issue") {
+	if !strings.Contains(workerEnvelope, "等待直属经理通过 hq issue") || !strings.Contains(workerEnvelope, "[HQ runtime protocol] version=1") {
 		t.Fatalf("worker startup envelope lost manager issue instruction: %s", workerEnvelope)
+	}
+	manager, ok := cfg.exactRule("zantianyou")
+	if !ok {
+		t.Fatal("test config missing manager")
+	}
+	managerEnvelope := startupEnvelopeWithBinary(manager, cfg.ownerPrincipal(), "/company/hq")
+	for _, required := range []string{"[HQ runtime protocol] version=1", "actor_directive.action=end_turn", "禁止用 sleep", "重新唤醒"} {
+		if !strings.Contains(managerEnvelope, required) {
+			t.Fatalf("manager startup envelope missing event-driven wait rule %q: %s", required, managerEnvelope)
+		}
 	}
 }
 
