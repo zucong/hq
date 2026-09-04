@@ -21,6 +21,8 @@ type ManagerQueueItem struct {
 	ActionEventID   string `json:"action_event_id,omitempty"`
 	StatusEventID   string `json:"status_event_id"`
 	StatusUpdatedAt string `json:"status_updated_at"`
+	BasisEventID    string `json:"basis_event_id"`
+	BasisUpdatedAt  string `json:"basis_updated_at"`
 }
 
 type ManagerQueueBacklog struct {
@@ -36,13 +38,27 @@ func managerQueueItemLess(left, right ManagerQueueItem) bool {
 	if leftPriority != rightPriority {
 		return leftPriority < rightPriority
 	}
-	if left.StatusUpdatedAt == right.StatusUpdatedAt {
+	leftSelectedAt := managerQueueItemSelectedAt(left)
+	rightSelectedAt := managerQueueItemSelectedAt(right)
+	if leftSelectedAt == rightSelectedAt {
 		if left.CaseID == right.CaseID {
 			return left.AssignmentID < right.AssignmentID
 		}
 		return left.CaseID < right.CaseID
 	}
-	return left.StatusUpdatedAt < right.StatusUpdatedAt
+	return leftSelectedAt < rightSelectedAt
+}
+
+func managerQueueItemBasis(item ManagerQueueItem) (string, string) {
+	if item.BasisEventID != "" && item.BasisUpdatedAt != "" {
+		return item.BasisEventID, item.BasisUpdatedAt
+	}
+	return item.StatusEventID, item.StatusUpdatedAt
+}
+
+func managerQueueItemSelectedAt(item ManagerQueueItem) string {
+	_, selectedAt := managerQueueItemBasis(item)
+	return selectedAt
 }
 
 func managerQueueKindPriority(kind string) int {
@@ -56,6 +72,75 @@ func managerQueueKindPriority(kind string) int {
 	default:
 		return 3
 	}
+}
+
+// isStrictCaseDescendant keeps queue supervision scoped to the manager's
+// current assignment tree. A sibling or another root can never refresh this
+// assignment's stall basis.
+func (s *ledgerState) isStrictCaseDescendant(caseID, ancestorID string) bool {
+	if caseID == "" || ancestorID == "" || caseID == ancestorID {
+		return false
+	}
+	seen := map[string]bool{}
+	current := s.snapshot.Cases[caseID]
+	for current != nil && current.ParentCaseID != "" && !seen[current.ID] {
+		seen[current.ID] = true
+		if current.ParentCaseID == ancestorID {
+			return true
+		}
+		current = s.snapshot.Cases[current.ParentCaseID]
+	}
+	return false
+}
+
+type managerDelegationProgress struct {
+	Covered bool
+	Latest  Event
+}
+
+// managerDelegationProgressFor separates a manager's own execution queue from
+// work they have durably delegated. An unconsumed descendant assignment issued
+// by this manager is driven by the activation/progress watchdog and later
+// becomes this manager's review item; nudging the parent assignment in parallel
+// would demand a report before the delegated evidence exists. An open
+// descendant still owned by the manager is covered by the owned_case item.
+//
+// Once those descendants converge, their latest business transition becomes
+// the parent's stable queue basis. This gives the manager a fresh stall window
+// to synthesize the result without allowing messages or infrastructure events
+// to manufacture progress.
+func (s *ledgerState) managerDelegationProgressFor(manager, parentCaseID string) managerDelegationProgress {
+	relevantCases := map[string]bool{}
+	progress := managerDelegationProgress{}
+	for _, eventID := range s.assignmentList {
+		assignment := s.assignments[eventID]
+		if assignment == nil || assignment.Issuer != manager ||
+			!s.isStrictCaseDescendant(assignment.CaseID, parentCaseID) {
+			continue
+		}
+		relevantCases[assignment.CaseID] = true
+		if !assignment.Consumed {
+			progress.Covered = true
+		}
+	}
+	for caseID, state := range s.snapshot.Cases {
+		if state == nil || state.Owner != manager || state.Status != string(statusOpen) ||
+			!s.isStrictCaseDescendant(caseID, parentCaseID) {
+			continue
+		}
+		relevantCases[caseID] = true
+		progress.Covered = true
+	}
+	for _, event := range s.events {
+		if !relevantCases[event.CaseID] ||
+			(event.Type != "case_created" && event.Type != "case_revised" && event.ToState == "") {
+			continue
+		}
+		if progress.Latest.ID == "" || event.Sequence > progress.Latest.Sequence {
+			progress.Latest = event
+		}
+	}
+	return progress
 }
 
 func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, error) {
@@ -95,9 +180,23 @@ func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, e
 		if _, err := parseOperationsTime("assignment status event.at", statusEvent.At); err != nil {
 			return nil, err
 		}
+		basisEvent := statusEvent
+		if kind == "work" && assignment.Status != "issued" {
+			delegation := s.managerDelegationProgressFor(manager, assignment.CaseID)
+			if delegation.Covered {
+				continue
+			}
+			if delegation.Latest.ID != "" && delegation.Latest.Sequence > statusEvent.Sequence {
+				basisEvent = delegation.Latest
+			}
+		}
+		if _, err := parseOperationsTime("manager queue basis event.at", basisEvent.At); err != nil {
+			return nil, err
+		}
 		byManager[manager] = append(byManager[manager], ManagerQueueItem{
 			Kind: kind, Manager: manager, AssignmentID: assignment.AssignmentID, CaseID: assignment.CaseID,
 			Status: assignment.Status, ActionEventID: actionEvent, StatusEventID: statusEvent.ID, StatusUpdatedAt: statusEvent.At,
+			BasisEventID: basisEvent.ID, BasisUpdatedAt: basisEvent.At,
 		})
 	}
 	for caseID, state := range s.snapshot.Cases {
@@ -122,6 +221,7 @@ func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, e
 		byManager[manager.Name] = append(byManager[manager.Name], ManagerQueueItem{
 			Kind: "owned_case", Manager: manager.Name, CaseID: caseID, Status: state.Status,
 			StatusEventID: statusEvent.ID, StatusUpdatedAt: statusEvent.At,
+			BasisEventID: statusEvent.ID, BasisUpdatedAt: statusEvent.At,
 		})
 	}
 	managers := make([]string, 0, len(byManager))
@@ -133,8 +233,9 @@ func (s *ledgerState) managerQueueBacklogs(cfg Config) ([]ManagerQueueBacklog, e
 	for _, manager := range managers {
 		items := byManager[manager]
 		sort.Slice(items, func(i, j int) bool { return managerQueueItemLess(items[i], items[j]) })
+		basisEventID, selectedAt := managerQueueItemBasis(items[0])
 		backlogs = append(backlogs, ManagerQueueBacklog{
-			Manager: manager, BasisEventID: items[0].StatusEventID, SelectedAt: items[0].StatusUpdatedAt, Items: items,
+			Manager: manager, BasisEventID: basisEventID, SelectedAt: selectedAt, Items: items,
 		})
 	}
 	return backlogs, nil

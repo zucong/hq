@@ -41,6 +41,8 @@ func TestManagerRoleManualPublishesDirectIssueAndAutomaticActivation(t *testing.
 		"所有者的带外工具授权",
 		"不创建或改变 assignment",
 		"saved permission",
+		"父项不会同时催你提前 report",
+		"普通 message 或 runtime 事件不能伪造进展",
 	} {
 		if !strings.Contains(manual, want) {
 			t.Fatalf("manager role manual missing %q:\n%s", want, manual)
@@ -78,6 +80,8 @@ func TestCompanyAndRepositoryDocsPublishManagerAuthorizationMatrix(t *testing.T)
 		"明确授权代理",
 		"不创建或改变 case/issue/assignment",
 		"saved deny",
+		"父 assignment 不重复催报",
+		"child submitted 后进入经理 review",
 	} {
 		if !strings.Contains(handbook, want) {
 			t.Fatalf("company handbook missing %q:\n%s", want, handbook)
@@ -98,6 +102,8 @@ func TestCompanyAndRepositoryDocsPublishManagerAuthorizationMatrix(t *testing.T)
 			"纠正命令",
 			"明确授权代理",
 			"saved deny",
+			"父 assignment",
+			"重新开始 stall 计时",
 		} {
 			if !strings.Contains(doc, want) {
 				t.Fatalf("%s missing manager delegation contract %q", path, want)

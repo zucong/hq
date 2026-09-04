@@ -1,10 +1,21 @@
-# HQ v1.1.3 正式发布与安装
+# HQ v1.1.4 正式发布与安装
 
-HQ v1.1.3 是经理 assignment 上行升级修复版本：保留 v1.1.2 的全部 CLI、registry v3、event v3
-及公司实例合同，同时消除经理执行直属上级 assignment 时无法创建 durable escalation 的控制面循环。本文定义它的构建、
+HQ v1.1.4 是委派感知的经理队列修复版本：保留 v1.1.3 的全部 CLI、registry v3、event v3
+及公司实例合同，同时消除直属下属正常执行时父 assignment 被重复催办和错误升级的控制面缺陷。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.1.4 委派感知的经理队列修复
+
+- 经理在自己的 `accepted|rework` 父 assignment 下创建并正式委派 child 后，不再因父 status event 未变化而被
+  manager queue watchdog 重复催报；执行中的 child 继续由 activation/progress watchdog 负责；
+- open child、active child、submitted child 分别路由为经理的委派动作、员工执行和经理 review，避免同一工作同时
+  催经理、员工和总部联络职责位；
+- child 收敛后以最近一次真实业务 transition 重置父项 stall basis，再给经理一个完整汇总窗口；message 和
+  delivery/runtime 维护事件不能伪造进展；
+- 回归场景覆盖“上级派经理 → 经理拆解并委派 → 下属执行 → 经理 review → 父任务汇总”，并验证执行期间不催经理、
+  review 到达时准确提示、收敛后不会沿用过期父 basis 立即升级。
 
 ## v1.1.3 经理 assignment 上行升级修复
 
@@ -43,7 +54,7 @@ HQ v1.1.3 是经理 assignment 上行升级修复版本：保留 v1.1.2 的全�
 
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.1.3 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 v1.1.4 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -60,8 +71,8 @@ fail closed，并由公司所有者明确从 v1.1.3 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.1.3 <完整小写commit> /tmp/hq-v1.1.3-release
-./scripts/release.sh verify /tmp/hq-v1.1.3-release
+./scripts/release.sh build v1.1.4 <完整小写commit> /tmp/hq-v1.1.4-release
+./scripts/release.sh verify /tmp/hq-v1.1.4-release
 ./scripts/test-gates.sh
 ```
 

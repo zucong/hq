@@ -51,6 +51,213 @@ func managerQueueSubmittedFixture(t *testing.T, caseID string) (testEnv, Config,
 	return e, cfg, issue, report
 }
 
+type managerDelegationQueueFixture struct {
+	env       testEnv
+	config    Config
+	liaison   AgentRule
+	manager   AgentRule
+	worker    AgentRule
+	parentID  string
+	childID   string
+	artifact  string
+	managerAt string
+	workerAt  string
+}
+
+func newManagerDelegationQueueFixture(t *testing.T) managerDelegationQueueFixture {
+	t.Helper()
+	e := setupTestEnv(t)
+	cfg := Config{
+		Version: registrySchemaVersion, WorkspaceLabel: "hq-test", OwnerPrincipal: "ZC",
+		Agents: []AgentRule{
+			{Name: "owner-channel", Label: "总部联络职责位", Nickname: "联络官", DepartmentLabel: "总裁办", Workspace: "hq-test", Responsibilities: []string{roleApprovalWitness, roleAccountCloser, "operations_manager"}, Department: "ceo-office", Kind: "codex", CanCreate: true, CanIssue: true, CanAccept: true, CanClose: true, CanManageStaff: true, CanReceiveOrder: true},
+			{Name: "delivery-manager", Label: "交付部负责人", Nickname: "交付负责人", DepartmentLabel: "交付部", Workspace: "hq-test", Responsibilities: []string{"manager:delivery"}, Department: "delivery", ReportsTo: "owner-channel", Kind: "codex", CanCreate: true, CanAccept: true, CanReceiveOrder: true},
+			{Name: "delivery-specialist", Label: "交付部执行人员", Nickname: "执行人员", DepartmentLabel: "交付部", Workspace: "hq-test", Responsibilities: []string{"specialist:delivery"}, Department: "delivery", ReportsTo: "delivery-manager", Kind: "codex", CanCreate: true, CanAccept: true, CanReceiveOrder: true},
+		},
+		DeliveryPolicy: &DeliveryPolicy{
+			DefaultMode:               deliveryModeAuto,
+			MaxConsecutiveWakes:       10,
+			ManagerQueueStallTimeout:  "15s",
+			ManagerQueueEscalateAfter: "30s",
+			MaxManagerQueueNudges:     2,
+		},
+	}
+	cfg = bindTestRoleContracts(cfg)
+	writeTestConfig(t, e.config, cfg)
+	for _, rule := range cfg.Agents {
+		writeTestFile(t, filepath.Join(e.root, rule.ManualPath), string(testRoleManual(rule.Name)))
+	}
+	liaison, manager, worker := cfg.Agents[0], cfg.Agents[1], cfg.Agents[2]
+	parentID, childID := "QUEUE-DELEGATED-PARENT", "QUEUE-DELEGATED-CHILD"
+	source := writeTestFile(t, filepath.Join(e.root, manager.Department, "delegated-source.md"), "# Delegated work source\n")
+	artifact := writeTestFile(t, filepath.Join(e.root, manager.Department, "delegated-result.md"), "# Delegated work result\n")
+	managerPane, workerPane := "queue:delegation-manager", "queue:delegation-worker"
+
+	e.setActor(t, liaison.Name, "queue:owner-channel", testAgentCWD(cfg, e.root, liaison.Name))
+	runTestCommand(t, e, "case", "create", "--id", parentID, "--title", "Supervise delegated delivery", "--project", "delegation-watchdog", "--source", source)
+	expires := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	runTestCommand(t, e, "approval", "request", "--id", "APR-QUEUE-DELEGATION", "--case", parentID, "--target", manager.Name, "--expires", expires)
+	runTestCommand(t, e, "approval", "grant", "--id", "APR-QUEUE-DELEGATION", "--issuer", cfg.ownerPrincipal())
+	runTestCommand(t, e, "issue", "--case", parentID, "--to", manager.Name, "--approval", "APR-QUEUE-DELEGATION", "--next", "Decompose, supervise, and synthesize the delivery")
+	events := scenarioEvents(t, e, cfg)
+	parentIssue := latestCaseEvent(events, parentID, "issue_sent")
+
+	e.setActor(t, manager.Name, managerPane, testAgentCWD(cfg, e.root, manager.Name))
+	runTestCommand(t, e, "accept", "--event", parentIssue.ID, "--next", "Delegate a bounded child assignment")
+	runTestCommand(t, e, "case", "create", "--id", childID, "--parent", parentID, "--title", "Produce delegated evidence", "--source", source)
+
+	return managerDelegationQueueFixture{
+		env: e, config: cfg, liaison: liaison, manager: manager, worker: worker,
+		parentID: parentID, childID: childID, artifact: artifact,
+		managerAt: managerPane, workerAt: workerPane,
+	}
+}
+
+func findManagerQueueBacklog(backlogs []ManagerQueueBacklog, manager string) (ManagerQueueBacklog, bool) {
+	for _, backlog := range backlogs {
+		if backlog.Manager == manager {
+			return backlog, true
+		}
+	}
+	return ManagerQueueBacklog{}, false
+}
+
+func TestManagerQueueRoutesDelegatedParentThroughChildLifecycle(t *testing.T) {
+	f := newManagerDelegationQueueFixture(t)
+	ledger, err := f.env.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err := ledger.managerQueueBacklogs(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlog, ok := findManagerQueueBacklog(backlogs, f.manager.Name)
+	if !ok || len(backlog.Items) != 1 || backlog.Items[0].Kind != "owned_case" || backlog.Items[0].CaseID != f.childID {
+		t.Fatalf("open delegated child did not replace premature parent report action: %+v", backlogs)
+	}
+
+	f.env.setActor(t, f.manager.Name, f.managerAt, testAgentCWD(f.config, f.env.root, f.manager.Name))
+	runTestCommand(t, f.env, "issue", "--case", f.childID, "--to", f.worker.Name, "--next", "Produce independently verifiable evidence")
+	events := scenarioEvents(t, f.env, f.config)
+	childIssue := latestCaseEvent(events, f.childID, "issue_sent")
+	f.env.setActor(t, f.worker.Name, f.workerAt, testAgentCWD(f.config, f.env.root, f.worker.Name))
+	runTestCommand(t, f.env, "accept", "--event", childIssue.ID, "--next", "Execute the delegated contract")
+	events = scenarioEvents(t, f.env, f.config)
+	childAccepted := latestCaseEvent(events, f.childID, "event_accepted")
+
+	ledger, err = f.env.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err = ledger.managerQueueBacklogs(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backlog, ok = findManagerQueueBacklog(backlogs, f.manager.Name); ok {
+		t.Fatalf("manager parent was actionable while direct report was executing: %+v", backlog)
+	}
+
+	now := mustEventTime(childAccepted).Add(16 * time.Second)
+	control := newFakeHerdrControl(f.env.root, f.config.WorkspaceLabel)
+	addOperationsLive(&control.snapshot, f.config, f.env.root, f.manager.Name, "idle", "delegated-manager-idle")
+	addOperationsLive(&control.snapshot, f.config, f.env.root, f.liaison.Name, "idle", "delegated-liaison-idle")
+	addOperationsLive(&control.snapshot, f.config, f.env.root, f.worker.Name, "working", "delegated-worker-working")
+	app := operationsTestApp(t, f.env, control, &now)
+	app.Identity = operationsIdentity{actor: Actor{Name: f.liaison.Name, Label: f.liaison.Label, Department: f.liaison.Department, Rule: f.liaison}}
+	app.CallerPane, app.MaintenancePane = "w-test:owner-channel", "w-test:owner-channel"
+	if err := app.runManagerQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if prompts := fakePromptCalls(control); len(prompts) != 0 {
+		t.Fatalf("active child execution caused a premature manager nudge: %v", prompts)
+	}
+	setFakeAgentStatus(control, f.worker.Name, "idle")
+	store := NewStore(f.env.data)
+	store.Now = func() time.Time { return now }
+	patrol := &PatrolService{Herdr: control, Store: store}
+	patrolReport, err := patrol.Run(context.Background(), f.config, f.env.root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patrolReport.Stalled != 1 {
+		t.Fatalf("idle child executor was not routed to the execution watchdog: %+v", patrolReport)
+	}
+	for _, finding := range patrolReport.Findings {
+		if finding.Category == "stalled" && finding.Agent != f.worker.Name {
+			t.Fatalf("delegated execution stall was assigned to the wrong seat: %+v", finding)
+		}
+	}
+
+	f.env.setActor(t, f.worker.Name, f.workerAt, testAgentCWD(f.config, f.env.root, f.worker.Name))
+	runTestCommand(t, f.env, "report", "--case", f.childID, "--result", "completed", "--artifact", f.artifact,
+		"--verify", "delegated evidence independently checked", "--next", "Manager reviews and synthesizes the parent")
+	events = scenarioEvents(t, f.env, f.config)
+	childReport := latestCaseEvent(events, f.childID, "report_sent")
+	ledger, err = f.env.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err = ledger.managerQueueBacklogs(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlog, ok = findManagerQueueBacklog(backlogs, f.manager.Name)
+	if !ok || len(backlog.Items) != 1 || backlog.Items[0].Kind != "review" || backlog.Items[0].ActionEventID != childReport.ID {
+		t.Fatalf("child submission did not become the manager's review action: %+v", backlogs)
+	}
+
+	f.env.setActor(t, f.manager.Name, f.managerAt, testAgentCWD(f.config, f.env.root, f.manager.Name))
+	runTestCommand(t, f.env, "accept", "--event", childReport.ID, "--next", "Synthesize accepted evidence into the parent report")
+	events = scenarioEvents(t, f.env, f.config)
+	childReview := latestCaseEvent(events, f.childID, "event_accepted")
+	runTestCommand(t, f.env, "message", "--to", f.worker.Name, "--kind", "info", "--case", f.childID,
+		"--text", "Accepted evidence recorded for parent synthesis", "--delivery", "quiet")
+	events = scenarioEvents(t, f.env, f.config)
+	contextMessage := latestCaseEvent(events, f.childID, "message_sent")
+	if contextMessage.ID == "" || contextMessage.Sequence <= childReview.Sequence {
+		t.Fatalf("fixture did not append the non-progress context message: review=%+v message=%+v", childReview, contextMessage)
+	}
+	ledger, err = f.env.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlogs, err = ledger.managerQueueBacklogs(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlog, ok = findManagerQueueBacklog(backlogs, f.manager.Name)
+	if !ok || len(backlog.Items) != 1 || backlog.Items[0].Kind != "work" || backlog.Items[0].CaseID != f.parentID {
+		t.Fatalf("converged child did not restore the parent synthesis action: %+v", backlogs)
+	}
+	if backlog.BasisEventID != childReview.ID || backlog.SelectedAt != childReview.At ||
+		backlog.Items[0].StatusEventID == childReview.ID {
+		t.Fatalf("parent stall window was not rebased without rewriting its status event: %+v", backlog)
+	}
+
+	now = mustEventTime(childReview).Add(14 * time.Second)
+	control = newFakeHerdrControl(f.env.root, f.config.WorkspaceLabel)
+	addOperationsLive(&control.snapshot, f.config, f.env.root, f.manager.Name, "idle", "rebased-manager-idle")
+	addOperationsLive(&control.snapshot, f.config, f.env.root, f.liaison.Name, "idle", "rebased-liaison-idle")
+	app = operationsTestApp(t, f.env, control, &now)
+	app.Identity = operationsIdentity{actor: Actor{Name: f.liaison.Name, Label: f.liaison.Label, Department: f.liaison.Department, Rule: f.liaison}}
+	app.CallerPane, app.MaintenancePane = "w-test:owner-channel", "w-test:owner-channel"
+	if err := app.runManagerQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if prompts := fakePromptCalls(control); len(prompts) != 0 {
+		t.Fatalf("manager was nudged before the rebased stall timeout: %v", prompts)
+	}
+	now = now.Add(2 * time.Second)
+	if err := app.runManagerQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prompts := fakePromptCalls(control)
+	if len(prompts) != 1 || !strings.HasPrefix(prompts[0], "prompt "+f.manager.Name+" ") || !strings.Contains(prompts[0], f.parentID) {
+		t.Fatalf("parent synthesis was not nudged after the fresh stall window: %v", prompts)
+	}
+}
+
 func TestManagerQueuePriorityDominatesAgeWithinActionableWork(t *testing.T) {
 	oldest := "2026-01-01T00:00:00Z"
 	newer := "2026-01-02T00:00:00Z"

@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.1.3 已正式发布；本文定义当前正式合同**
+状态：**v1.1.4 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -626,10 +626,18 @@ gemini/grok/kimi/opencode/qwen 补齐该 kind 的必需自动授权 argv。未�
 gateway 的 manager queue watchdog 将 ledger 的 assignment/case 投影与 Herdr live binding 联合判断。它把
 submission review、经理自己的 active assignment、以及无 active assignment 的经理持有 open case 视为 actionable
 队列，并固定按 `review > work > owned_case` 排序、只在同类内按时间 FIFO。只在精确目标为 idle/done 且当前
-最高优先级 status event 超时后工作。每个 `manager + selected status event + stage`
+最高优先级业务 basis event 超时后工作。每个 `manager + selected basis event + stage`
 形成 nudge dedupe key，提醒次数有界且跨重启恢复。额度耗尽后，守卫沿 `reports_to` 向上生成一次 durable escalation。
 若 Prompt 已尝试但结果不确定，则冻结该 nudge、禁止重投，并升级要求人工 reconcile。守卫不能代替 reviewer 执行
 accept/return，也不能改变业务状态；`patrol` 只额外报告 `stalled` finding。
+
+队列投影必须理解 durable delegation。对于经理本人 `accepted|rework` 的 assignment，只有位于该 case 严格
+descendant、且由该经理签发的 assignment 才能覆盖父项：child 未消费时，执行责任由 assignment activation/progress
+watchdog 推动，父项不得并行要求提前 report；child `submitted` 时，冻结 acceptor 的 review 项自然取得最高优先级。
+经理仍持有的 open descendant 则以 `owned_case` 单独进入队列，不能被父 `work` 项遮蔽。相关 child 全部收敛后，
+最近一次 `case_created|case_revised` 或带 `to_state` 的业务 transition 成为父 assignment 的新 stall basis，并重新开始 stall 计时，给经理完整的汇总窗口。
+普通 message、delivery/runtime 基础设施事件、sibling、另一棵树或非该经理签发的 assignment 均不能刷新 basis。
+因此执行守卫、review 守卫与父任务汇总守卫各自只有一个明确责任人，同时保留有界催办和向上升级。
 
 独立的 closure queue watchdog 处理验收与销账之间的控制面缺口。它只从严格重放结果选择
 `accepted|finding_accepted`、无 active assignment、目标无未收敛 workflow delivery、所有直属 child 已
@@ -735,7 +743,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.1.3 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.4 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.1.3 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.1.4 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -588,9 +588,14 @@ trigger=assignment_progress` 指示其只从原 assignment、工位文件和 led
 以及经理新建但尚未形成 active assignment 的 `open` case。`accepted`、`blocked`、`escalated` 等历史或待外部动作
 状态不会仅因 owner 仍是经理而触发误催。队列固定按“待审 submission → 经理本人的 active/rework assignment
 → 尚未委派的 owned open case”排序，并只在同一优先级内按时间 FIFO；低优先级旧 case 不得遮蔽返工或验收。
+经理本人处于 `accepted|rework` 的父 assignment 若已有严格 descendant：尚未委派的 owned `open` child 由
+`owned_case` 项推动；经理签发给下属且尚未消费的 child assignment 由 activation/progress watchdog 推动，父项在
+该执行或 review 闭环期间暂不重复催报；child 一旦 submitted 就直接成为经理的最高优先级 review 项。全部相关
+child 收敛后，父项以最近一次真实 child 业务 transition 重新开始 stall 计时，再要求经理汇总 report。普通 message、
+投递维护和 runtime 事件不能伪造这一进展；其他 root、sibling 或非该经理签发的工作也不能刷新 basis。
 只有目标精确在岗且 Herdr 状态为 `idle|done`，当前最高优先级待办又超过
-`manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。该项 status event
-作为稳定 basis；提醒至少间隔一个 stall timeout，最多 `max_manager_queue_nudges` 次。最后一次提醒后仍超过
+`manager_queue_stall_timeout` 时，HQ 才会发送带精确纠错命令的 durable nudge。该项计算出的业务 basis event
+作为稳定去重依据；提醒至少间隔一个 stall timeout，最多 `max_manager_queue_nudges` 次。最后一次提醒后仍超过
 `manager_queue_escalate_after`，HQ 会把问题升级给 registry 中的 `reports_to`。Prompt 结果不确定时禁止自动重投，
 并升级要求核对 `nudge status/reconcile`。这个守卫只推动负责人作出决定，绝不自动 accept/return、改变 owner/status
 或生成质量结论。`hq patrol --json` 同时以 `stalled` finding 显示这类“人已空闲、durable 队列未清”的状态。
@@ -998,7 +1003,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.1.3 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.4 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证
