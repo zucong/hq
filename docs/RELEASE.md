@@ -1,10 +1,19 @@
-# HQ v1.1.1 正式发布与安装
+# HQ v1.1.2 正式发布与安装
 
-HQ v1.1.1 是运行守护修复版本：保留 v1.1.0 整理后的源码布局与全部 CLI、registry v3、event v3
-及公司实例合同，同时修复 Codex safety-buffering 误判和 gateway 维护 pane 老化。本文定义它的构建、
+HQ v1.1.2 是经理运行恢复修复版本：保留 v1.1.1 的全部 CLI、registry v3、event v3
+及公司实例合同，同时让 provider safeguard fallback 能恢复经理对未完成下属 assignment 的监督责任。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.1.2 经理运行恢复修复
+
+- runtime recovery manifest 将经理作为 reviewer/acceptor 监督的 `issued|accepted|rework|submitted`
+  下属 assignment 纳入 durable work，避免经理没有亲自接单时被错误判为空闲无任务；
+- 恢复信封以 `SUPERVISED_ASSIGNMENT` 区分监督责任与执行权：下属继续执行，经理不得接管或重复委派，
+  只有正式 submission 到达后才按冻结合同 accept/return；
+- 同一有界清单同时用于 content-safeguard fallback 与 runtime-profile repair，最多仍展开 8 项；
+- v1.1.1 的 safety-buffering 与维护 pane 修复保持为当前发布基线。
 
 ## v1.1.1 运行守护修复
 
@@ -24,7 +33,7 @@ HQ v1.1.1 是运行守护修复版本：保留 v1.1.0 整理后的源码布局�
 
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.1.1 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 v1.1.2 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -41,8 +50,8 @@ fail closed，并由公司所有者明确从 v1.1.1 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.1.1 <完整小写commit> /tmp/hq-v1.1.1-release
-./scripts/release.sh verify /tmp/hq-v1.1.1-release
+./scripts/release.sh build v1.1.2 <完整小写commit> /tmp/hq-v1.1.2-release
+./scripts/release.sh verify /tmp/hq-v1.1.2-release
 ./scripts/test-gates.sh
 ```
 

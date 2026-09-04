@@ -110,8 +110,11 @@ func TestRuntimeRecoveryWorkFiltersHistoricalStatesAndBoundsManifest(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(work.assignments) != 0 || len(work.cases) != maxRuntimeRecoveryItems || work.omitted != 2 {
-		t.Fatalf("unexpected bounded recovery work: assignments=%d cases=%d omitted=%d", len(work.assignments), len(work.cases), work.omitted)
+	if len(work.assignments) != 0 || len(work.supervisedAssignments) != 1 || len(work.cases) != maxRuntimeRecoveryItems-1 || work.omitted != 3 {
+		t.Fatalf("unexpected bounded recovery work: assignments=%d supervised=%d cases=%d omitted=%d", len(work.assignments), len(work.supervisedAssignments), len(work.cases), work.omitted)
+	}
+	if work.supervisedAssignments[0].Status != "submitted" {
+		t.Fatalf("submitted review was not preserved: %+v", work.supervisedAssignments)
 	}
 	for _, state := range work.cases {
 		if state.Status != string(statusOpen) || state.ID == "RECOVERY-HISTORICAL" || state.ID == "RECOVERY-SUBMITTED" {
@@ -119,10 +122,98 @@ func TestRuntimeRecoveryWorkFiltersHistoricalStatesAndBoundsManifest(t *testing.
 		}
 	}
 	prompt := runtimeProfileRecoveryEnvelope(AgentRule{Name: manager}, runtimeProfile{Model: "sol", ReasoningEffort: "medium"}, runtimeProfile{Model: "luna", ReasoningEffort: "low"}, work)
-	if strings.Contains(prompt, "RECOVERY-HISTORICAL") || strings.Contains(prompt, "RECOVERY-SUBMITTED") ||
-		!strings.Contains(prompt, "另有 2 项 actionable durable work 未在本信封展开") ||
-		strings.Count(prompt, "ACTIVE_OWNED_CASE") != maxRuntimeRecoveryItems {
+	if strings.Contains(prompt, "RECOVERY-HISTORICAL") ||
+		!strings.Contains(prompt, "另有 3 项 actionable durable work 未在本信封展开") ||
+		strings.Count(prompt, "SUPERVISED_ASSIGNMENT") != 1 ||
+		strings.Count(prompt, "ACTIVE_OWNED_CASE") != maxRuntimeRecoveryItems-1 {
 		t.Fatalf("runtime recovery prompt was misleading or unbounded:\n%s", prompt)
+	}
+}
+
+func TestRuntimeFallbackReplacesSafeguardedManagerWithActiveSupervision(t *testing.T) {
+	e := setupTestEnv(t)
+	cfg, err := mutateConfig(e.config, func(cfg *Config) error {
+		cfg.RuntimeFallback = &RuntimeFallbackPolicy{
+			Auto: true, Trigger: "content_safeguard", FromKind: "codex", ToKind: "grok",
+			PermissionMode: "yolo", AgentArgs: []string{"--always-approve"},
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hydrateRuntimeFallback(&cfg)
+	manager, _ := cfg.exactRule("zantianyou")
+	worker, _ := cfg.exactRule("eng-developer")
+	e.setActor(t, manager.Name, "fallback:manager-supervision", testAgentCWD(cfg, e.root, manager.Name))
+	source := writeTestFile(t, filepath.Join(e.root, "engineering", "fallback-manager-source.md"), "# manager fallback source\n")
+	runTestCommand(t, e, "case", "create", "--id", "RUNTIME-FALLBACK-MANAGER-001", "--title", "manager supervision fallback", "--source", source)
+	runTestCommand(t, e, "issue", "--case", "RUNTIME-FALLBACK-MANAGER-001", "--to", worker.Name, "--next", "continue under manager supervision")
+	events, err := NewStore(e.data).ReadAll(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued := latestCaseEvent(events, "RUNTIME-FALLBACK-MANAGER-001", "issue_sent")
+	e.setActor(t, worker.Name, "fallback:worker", testAgentCWD(cfg, e.root, worker.Name))
+	runTestCommand(t, e, "accept", "--event", issued.ID, "--next", "execute")
+
+	work, err := e.app(t).runtimeRecoveryWorkFor(manager.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if work.empty() || len(work.supervisedAssignments) != 1 || work.supervisedAssignments[0].Status != "accepted" {
+		t.Fatalf("manager supervision was not recoverable: %+v", work)
+	}
+
+	control := newFakeHerdrControl(e.root, cfg.WorkspaceLabel)
+	control.snapshot = healthySnapshot(e.root, manager, "idle")
+	control.snapshot.Panes[0].TerminalID = "terminal-manager-codex-1"
+	control.snapshot.Panes[0].Revision = 1
+	control.snapshot.Agents[0].TerminalID = "terminal-manager-codex-1"
+	control.snapshot.Agents[0].Revision = 1
+	control.snapshot.Agents[0].AgentSession = &HerdrAgentSession{Source: "native", Agent: manager.Name, Kind: "codex", Value: "manager-codex-session-1"}
+	control.nextID = 2
+	reader := &fallbackReaderControl{fakeHerdrControl: control, terminal: []byte("ⓘ This content can't be shown\nWe take extra caution with cybersecurity requests.\nTrusted Access: https://chatgpt.com/cyber/\n› Ask Codex to do anything\n")}
+	sessions := &FileSessionStore{Root: filepath.Join(e.data, "runtime-fallback-manager-sessions")}
+	created := HerdrTabCreated{Tab: control.snapshot.Tabs[0], Pane: control.snapshot.Panes[0]}
+	started, err := newSessionEvent(time.Now().Add(-time.Minute), sessionStarted, created, "w-test", manager, "hq-up", "manager primary runtime", testAgentCWD(cfg, e.root, manager.Name))
+	if err == nil {
+		binding, bindingErr := ResolveLiveBinding(control.snapshot, cfg, e.root, LiveBindingRequest{Seat: manager.Name, RequireInteractiveReady: true})
+		if bindingErr != nil {
+			err = bindingErr
+		} else {
+			started, err = bindSessionEventRuntime(started, binding)
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sessions.Append(started); err != nil {
+		t.Fatal(err)
+	}
+
+	app := e.app(t)
+	app.Config = cfg
+	app.Herdr = reader
+	app.Sessions = sessions
+	if err := app.recoverContentSafeguardsOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := app.herdrSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := ResolveLiveBinding(snapshot, cfg, e.root, LiveBindingRequest{Seat: manager.Name, RequireInteractiveReady: true})
+	if err != nil || binding.Kind != "grok" {
+		t.Fatalf("manager fallback binding=%+v err=%v", binding, err)
+	}
+	control.mu.Lock()
+	calls := strings.Join(control.calls, "\n")
+	control.mu.Unlock()
+	if !strings.Contains(calls, "SUPERVISED_ASSIGNMENT") || !strings.Contains(calls, "RUNTIME-FALLBACK-MANAGER-001") ||
+		!strings.Contains(calls, "下属仍持有执行权") {
+		t.Fatalf("manager recovery prompt lost supervision contract:\n%s", calls)
 	}
 }
 

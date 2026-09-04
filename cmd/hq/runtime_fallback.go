@@ -14,9 +14,10 @@ const (
 )
 
 type runtimeRecoveryWork struct {
-	assignments []AssignmentView
-	cases       []*CaseState
-	omitted     int
+	assignments           []AssignmentView
+	supervisedAssignments []AssignmentView
+	cases                 []*CaseState
+	omitted               int
 }
 
 func terminalShowsContentSafeguard(raw []byte) bool {
@@ -39,12 +40,24 @@ func (a *App) runtimeRecoveryWorkFor(agent string) (runtimeRecoveryWork, error) 
 	caseSeen := map[string]bool{}
 	for _, view := range ledger.assignmentViews() {
 		assignment := ledger.assignments[view.AssignmentEventID]
-		if assignment == nil || assignment.Recipient != agent || assignment.Consumed ||
-			(assignment.Status != "issued" && assignment.Status != "accepted" && assignment.Status != "rework") {
+		if assignment == nil || assignment.Consumed {
 			continue
 		}
-		work.assignments = append(work.assignments, view)
-		caseSeen[view.CaseID] = true
+		if assignment.Recipient == agent &&
+			(assignment.Status == "issued" || assignment.Status == "accepted" || assignment.Status == "rework") {
+			work.assignments = append(work.assignments, view)
+			caseSeen[view.CaseID] = true
+			continue
+		}
+		// A manager may have no assignment of their own while a subordinate is
+		// executing work that the manager must later review. That reviewer duty is
+		// still durable work for runtime recovery: otherwise a provider safeguard
+		// can strand the manager until (and even after) the subordinate reports.
+		if (assignment.Reviewer == agent || assignment.Acceptor == agent) &&
+			(assignment.Status == "issued" || assignment.Status == "accepted" || assignment.Status == "rework" || assignment.Status == "submitted") {
+			work.supervisedAssignments = append(work.supervisedAssignments, view)
+			caseSeen[view.CaseID] = true
+		}
 	}
 	for _, state := range ledger.snapshot.Cases {
 		// Ownership alone does not make historical or externally blocked work
@@ -56,12 +69,32 @@ func (a *App) runtimeRecoveryWorkFor(agent string) (runtimeRecoveryWork, error) 
 		work.cases = append(work.cases, state)
 	}
 	sort.Slice(work.assignments, func(i, j int) bool { return work.assignments[i].AssignmentID < work.assignments[j].AssignmentID })
+	sort.Slice(work.supervisedAssignments, func(i, j int) bool {
+		leftSubmitted := work.supervisedAssignments[i].Status == "submitted"
+		rightSubmitted := work.supervisedAssignments[j].Status == "submitted"
+		if leftSubmitted != rightSubmitted {
+			return leftSubmitted
+		}
+		return work.supervisedAssignments[i].AssignmentID < work.supervisedAssignments[j].AssignmentID
+	})
 	sort.Slice(work.cases, func(i, j int) bool { return work.cases[i].ID < work.cases[j].ID })
-	if len(work.assignments) >= maxRuntimeRecoveryItems {
-		work.omitted = len(work.assignments) - maxRuntimeRecoveryItems + len(work.cases)
+	remaining := maxRuntimeRecoveryItems
+	if len(work.assignments) >= remaining {
+		work.omitted = len(work.assignments) - remaining + len(work.supervisedAssignments) + len(work.cases)
 		work.assignments = work.assignments[:maxRuntimeRecoveryItems]
+		work.supervisedAssignments = nil
 		work.cases = nil
-	} else if remaining := maxRuntimeRecoveryItems - len(work.assignments); len(work.cases) > remaining {
+		return work, nil
+	}
+	remaining -= len(work.assignments)
+	if len(work.supervisedAssignments) >= remaining {
+		work.omitted = len(work.supervisedAssignments) - remaining + len(work.cases)
+		work.supervisedAssignments = work.supervisedAssignments[:remaining]
+		work.cases = nil
+		return work, nil
+	}
+	remaining -= len(work.supervisedAssignments)
+	if len(work.cases) > remaining {
 		work.omitted = len(work.cases) - remaining
 		work.cases = work.cases[:remaining]
 	}
@@ -69,7 +102,17 @@ func (a *App) runtimeRecoveryWorkFor(agent string) (runtimeRecoveryWork, error) 
 }
 
 func (work runtimeRecoveryWork) empty() bool {
-	return len(work.assignments) == 0 && len(work.cases) == 0
+	return len(work.assignments) == 0 && len(work.supervisedAssignments) == 0 && len(work.cases) == 0
+}
+
+func supervisedAssignmentRecoveryLine(assignment AssignmentView) string {
+	action := "下属仍持有执行权；不要接管或重复委派。核验 durable 状态后等待其正式 report，再按冻结验收合同 review。"
+	if assignment.Status == "submitted" {
+		action = "已有正式 submission 待审；核验 durable 状态与产物后，按冻结验收合同显式 accept 或 return。"
+	}
+	return fmt.Sprintf("SUPERVISED_ASSIGNMENT id=%s event=%s case=%s status=%s assignee=%s reviewer=%s；先运行 `hq assignment show --id %s` 与 `hq history --case %s`。%s",
+		assignment.AssignmentID, assignment.AssignmentEventID, assignment.CaseID, assignment.Status, assignment.Assignee, assignment.Reviewer,
+		assignment.AssignmentID, assignment.CaseID, action)
 }
 
 func runtimeRecoveryEnvelope(rule AgentRule, policy RuntimeFallbackPolicy, work runtimeRecoveryWork) string {
@@ -82,6 +125,9 @@ func runtimeRecoveryEnvelope(rule AgentRule, policy RuntimeFallbackPolicy, work 
 		lines = append(lines, fmt.Sprintf("ACTIVE_ASSIGNMENT id=%s event=%s case=%s status=%s issuer=%s reviewer=%s；先运行 `hq assignment show --id %s` 与 `hq history --case %s`；若 status=issued，再运行 `hq accept --event %s`，否则从 durable 状态继续。",
 			assignment.AssignmentID, assignment.AssignmentEventID, assignment.CaseID, assignment.Status, assignment.Issuer, assignment.Reviewer,
 			assignment.AssignmentID, assignment.CaseID, assignment.AssignmentEventID))
+	}
+	for _, assignment := range work.supervisedAssignments {
+		lines = append(lines, supervisedAssignmentRecoveryLine(assignment))
 	}
 	for _, state := range work.cases {
 		lines = append(lines, fmt.Sprintf("ACTIVE_OWNED_CASE id=%s version=%d status=%s title=%q；先运行 `hq case show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。", state.ID, state.Version, state.Status, state.Title, state.ID, state.ID))

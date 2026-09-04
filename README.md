@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.1.1 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.1.2 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -865,11 +865,12 @@ CloseTab definitely-not-run 进入 `profile_repair_failed` 并可由 watcher 安
 
 - 终端尾部同时出现完整的 provider `This content can't be shown`、cybersecurity/Trusted Access 文本与 Codex 输入提示，而非仅在任务正文中引用这句话；
 - runtime 仍精确绑定当前 workspace/tab/pane/terminal/native session，且处于 idle/blocked；
-- seat 持有未完成的 durable assignment 或 case，可生成恢复清单。
+- seat 持有未完成的 durable assignment、尚未委派的 owned open case，或作为 reviewer/acceptor 仍监督未完成的下属 assignment，可生成恢复清单。
 
 状态机先记录 `fallback_attempting`，只有 Herdr snapshot 明确证明旧 tab 消失后，才追加 `stopped`
 并启动新载体。关闭结果不确定时进入 `fallback_unknown`，禁止自动启动第二个运行实例。新 session
-使用同一 seat、工位和 HQ 账本；恢复信封沿用上述 actionable-only、最多 8 项的清单合同并给出精确查询命令。
+使用同一 seat、工位和 HQ 账本；恢复信封沿用上述 actionable-only、最多 8 项的清单合同并给出精确查询命令。经理的监督项以
+`SUPERVISED_ASSIGNMENT` 明示：下属仍持有执行权，经理不得接管或重复委派；`submitted` 时才按冻结合同 review。
 隐藏模型聊天记录不会被宣称为跨供应商复制；连续性来自 durable ledger、版本化 `AGENTS.md` 和同一 workstation。
 `fallback_recovery_sent` 是恢复信封已确认投递的审计事实；
 记账失败时允许幂等重发该恢复信封，但不重建 case 或 assignment。
@@ -993,7 +994,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.1.1 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.2 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证

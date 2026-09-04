@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.1.1 已正式发布；本文定义当前正式合同**
+状态：**v1.1.2 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -385,6 +385,9 @@ Assignment Contract 保持不变。这个分层允许既有在途 assignment 在
 
 `content_safeguard` detector 只读 Herdr 的有界 detection scrollback，并要求完整 provider 标记与终端输入提示同时存在。
 它不因任务文本单独引用 `This content can't be shown` 而触发，也不对无 durable active work 的空闲 seat 切换。
+durable work 不只包含 seat 本人持有的 `issued|accepted|rework` assignment 与尚未委派的 owned `open` case；
+经理作为 reviewer/acceptor 监督的未完成下属 assignment 同样必须进入恢复清单，否则模型拦截可能在下属 report 前后
+把唯一 reviewer 永久留在旧载体。监督项不会转移执行权，也不会允许经理重复委派。
 切换共用 runtime-seat lease、ESTOP admission、up lock 和 current-registry lease。旧 session 先进入 `fallback_attempting`；
 CloseTab 后只有 snapshot 证明 tab absence 才写 `stopped` 并启动新 kind。`fallback_unknown` 禁止自动重试，
 避免一个 seat 同时出现两个载体。
@@ -394,7 +397,8 @@ CloseTab 后只有 snapshot 证明 tab absence 才写 `stopped` 并启动新 kin
 
 新载体的 recovery envelope 沿用 runtime profile 的 actionable-only、有界清单合同，要求新会话重读当前
 `AGENTS.md`、`assignment show`、`history` 与同一 workstation。HQ 不声称能复制前一模型的隐藏 transcript；
-它保证的是组织身份与持久任务事实连续。投递确认后追加 `fallback_recovery_sent`；如果仅该记账失败，
+`SUPERVISED_ASSIGNMENT` 明确区分经理监督责任与下属执行责任；只有 submission 到达后才要求 review。它保证的是
+组织身份与持久任务事实连续。投递确认后追加 `fallback_recovery_sent`；如果仅该记账失败，
 下一轮可幂等重发 recovery envelope，不重建 case/assignment。
 
 ## 9. 业务模型
@@ -726,7 +730,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.1.1 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.2 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

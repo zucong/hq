@@ -111,6 +111,9 @@ func assignmentProgressRuntimeRecoveryEnvelope(rule AgentRule, work runtimeRecov
 		lines = append(lines, fmt.Sprintf("ACTIVE_ASSIGNMENT id=%s event=%s case=%s status=%s；运行 `hq assignment show --id %s` 与 `hq history --case %s`，从 durable 状态继续；不要重复 accept 或建立替代任务。",
 			assignment.AssignmentID, assignment.AssignmentEventID, assignment.CaseID, assignment.Status, assignment.AssignmentID, assignment.CaseID))
 	}
+	for _, assignment := range work.supervisedAssignments {
+		lines = append(lines, supervisedAssignmentRecoveryLine(assignment))
+	}
 	lines = append(lines, "继续未完成工作；完成后必须在原 case 运行 `hq report`，受阻必须 `hq report --result blocked`，不得仅结束 Agent 回合。")
 	return strings.Join(lines, "\n")
 }

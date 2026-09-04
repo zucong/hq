@@ -271,6 +271,9 @@ func runtimeProfileRecoveryEnvelope(rule AgentRule, expected, observed runtimePr
 		lines = append(lines, fmt.Sprintf("ACTIVE_ASSIGNMENT id=%s event=%s case=%s status=%s；先运行 `hq assignment show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。",
 			assignment.AssignmentID, assignment.AssignmentEventID, assignment.CaseID, assignment.Status, assignment.AssignmentID, assignment.CaseID))
 	}
+	for _, assignment := range work.supervisedAssignments {
+		lines = append(lines, supervisedAssignmentRecoveryLine(assignment))
+	}
 	for _, state := range work.cases {
 		lines = append(lines, fmt.Sprintf("ACTIVE_OWNED_CASE id=%s version=%d status=%s title=%q；先运行 `hq case show --id %s` 与 `hq history --case %s`，再从 durable 状态继续。", state.ID, state.Version, state.Status, state.Title, state.ID, state.ID))
 	}
