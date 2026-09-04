@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -210,6 +211,9 @@ func nativeAgentArgsForConfig(cfg Config, rule AgentRule) ([]string, error) {
 }
 
 func observedCodexRuntimeProfile(raw []byte) (runtimeProfile, error) {
+	if terminalShowsCodexSafetyBuffering(raw) {
+		return runtimeProfile{}, errCodexSafetyBufferingVisible
+	}
 	lines := strings.Split(strings.ReplaceAll(string(raw), "\r", ""), "\n")
 	for index := len(lines) - 1; index >= 0; index-- {
 		fields := strings.Fields(lines[index])
@@ -420,6 +424,12 @@ func (a *App) recoverRuntimeProfileSeat(ctx context.Context, workspaceID string,
 		}
 		expected, observed, mismatch, inspectErr := inspectLiveRuntimeProfile(ctx, reader, a.Config, binding)
 		if inspectErr != nil {
+			if errors.Is(inspectErr, errCodexSafetyBufferingVisible) {
+				if requireAction {
+					return fmt.Errorf("seat %s 正在显示 Codex 的 Dismiss and keep waiting 界面；该界面明确说明无需操作，HQ 不发送按键并继续等待原 model，以免竞态中断正常回合；界面消失后重试 profile 核验", rule.Name)
+				}
+				return nil
+			}
 			return inspectErr
 		}
 		if expected.Kind == "" {
@@ -602,6 +612,12 @@ func addRuntimeProfilePatrolFindings(ctx context.Context, analysis *patrolAnalys
 		expected, observed, mismatch, inspectErr := inspectLiveRuntimeProfile(ctx, reader, cfg, binding)
 		objectID := "agent:" + binding.WorkspaceID + ":" + binding.Seat
 		if inspectErr != nil {
+			if errors.Is(inspectErr, errCodexSafetyBufferingVisible) {
+				// This is a transient Codex UI overlay, not evidence of model
+				// drift. "No action is required" is the only race-free form of
+				// Dismiss and keep waiting available through Herdr today.
+				continue
+			}
 			addPatrolFinding(analysis, PatrolFinding{Category: "drift", ObjectID: objectID, Agent: binding.Seat, TabID: binding.TabID,
 				SignalType: "runtime_profile_unverified", Message: inspectErr.Error() + "；不要把该 seat 判为 profile healthy；运行 `herdr agent read " + binding.Seat + " --source detection --lines 160 --format text` 核验"})
 			continue

@@ -21,7 +21,7 @@ func terminalReadyForHQPrompt(kind string, raw []byte) bool {
 	if kind != "codex" {
 		return true
 	}
-	if terminalShowsContentSafeguard(raw) {
+	if terminalShowsContentSafeguard(raw) || terminalShowsCodexSafetyBuffering(raw) {
 		return false
 	}
 	text := string(raw)

@@ -291,6 +291,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "\n简记：角色卡是岗位，Assignment 是合同，任务目录是工作台，Herdr Prompt 是门铃。")
 	fmt.Fprintln(&b, "如果模型供应商显示 `This content can't be shown`，启用了 `runtime_fallback` 的 HQ 会保守结束旧 runtime，在同一 seat/工位上启动备用载体，并以 `[HQ runtime recovery]` 重建 durable assignment/case 上下文。这不会复制隐藏聊天记录，也不改变角色或业务合同。")
 	fmt.Fprintln(&b, "如果 `hq patrol` 报 `runtime_profile_mismatch`，说明当前 model/effort 与 registry 声明不符。HQ 只会在 idle|done 安全边界恢复，不中断 working|blocked；恢复仍使用同一 seat、角色卡、工位和 durable assignment。若报 `profile_repair_unknown`，由 can_manage_staff 角色核验同一 incarnation/tab 后按报错执行单 seat `hq --direct runtime repair-profile --agent <seat> --retry-unknown`；禁止裸 Herdr 重启。")
+	fmt.Fprintln(&b, "如果 Codex 显示 `Retry with a faster model / Dismiss and keep waiting`，公司策略固定为保留原 model/effort 并继续等待。该界面写明 `No action is required`，HQ 不发送 Esc、数字键或 Enter：选择器可能自行消失，随后到达的按键会中断正常回合或进入输入框。等待期间也不会把被遮住的 footer 误报为 profile drift；不要手工选择 faster model。")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "总裁秘书是 registry 中唯一 `approval_witness` 职责位，也是人类公司所有者与虚拟公司总部之间的双向沟通管道。具体 agent 名字和花名可配置，不参与权限判断。总裁秘书上传人类已经明确作出的决定、据此向部门经理下达公司级事项，并把已验收证据、风险和待决问题汇总给人类；不得代替人类决定组织变更、产品方向、优先级或风险接受。")
 

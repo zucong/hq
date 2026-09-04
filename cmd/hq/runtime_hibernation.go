@@ -831,6 +831,15 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 		}
 		child.Config = cfg
 	}
+	if child.MaintenanceActor != "" {
+		if bindingErr := child.refreshMaintenanceBinding(ctx); bindingErr != nil {
+			// Never keep using a pane that may now belong to a shell, replacement
+			// runtime, or unrelated agent. Runtime/profile checks can continue, but
+			// watchdog business nudges stay fail-closed until the seat is live.
+			child.MaintenancePane = ""
+			fmt.Fprintf(a.Err, "[HQ maintenance binding] %v\n", bindingErr)
+		}
+	}
 	if fallbackErr := child.recoverContentSafeguardsOnce(ctx); fallbackErr != nil {
 		fmt.Fprintf(a.Err, "[HQ runtime fallback] %v\n", fallbackErr)
 	}

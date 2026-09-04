@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.1.0 已正式发布；本文定义当前正式合同**
+状态：**v1.1.1 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -366,6 +366,17 @@ session 诊断为 `profile_repair_attempting|failed|unknown`。只有 snapshot �
 展开 8 项，溢出只记录数量并让 Agent 查询 ledger；投递后记 `profile_recovery_sent`。unknown 禁止自动重试；只能在人工核验同一 incarnation/tab 后对单一 seat 执行
 `hq --direct runtime repair-profile --agent <seat> --retry-unknown`，避免延迟 CloseTab 与新 runtime 双占座。
 
+Codex 的 safety-buffering 选择器完整出现时，`Retry with a faster model` 明确意味着降低能力换取速度，
+因此不属于允许的自动恢复路径。HQ 采用 `Dismiss and keep waiting` 的语义并保留 desired model/effort；由于
+界面同时声明 `No action is required`，HQ 不发送任何终端按键。Herdr 当前没有 screen-match CAS，选择器可能在
+观察与按键之间自行消失，此时 `Esc` 会中断正常回合，数字键或 `Enter` 也可能进入 composer。检测期间该界面
+只表示 footer 被暂时遮挡：profile watcher 和 patrol 均不把它解释为 unverified/mismatch，任务投递也等待界面消失。
+
+Gateway 的 `MaintenanceActor` 冻结获授权的 seat identity，`MaintenancePane` 只是该 seat 当前 incarnation 的
+运行索引。每轮守护从实时 snapshot 重新解析同一 `can_manage_staff` seat；pane 更新后继续内部 durable nudge，
+无法取得唯一可交互 binding 时清空过期 pane 并 fail closed。这样管理席位正常重启不会让 manager、closure 或
+assignment-progress watchdog 永久绑定已退休 pane，也不会把另一个 occupant 冒认为原授权角色。
+
 ### Runtime carrier fallback
 
 `runtime_fallback` 是公司级运行策略，不是第二份员工编制。它只允许已登记 seat 的 primary `kind`
@@ -715,7 +726,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.1.0 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.1 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

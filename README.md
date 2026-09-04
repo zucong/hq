@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.1.0 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.1.1 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -357,6 +357,7 @@ delivery_policy:
 - 每名在职 seat 必须声明合法 Herdr `kind`，才能常驻或按需启动。
 - `permission_mode` 为 `yolo|native`；`native` 只传递显式 `agent_args`；`yolo` 会在显式参数后补齐该 kind 的必需自动授权 argv，不允许自定义参数意外降权。
 - 可选 `runtime_profiles.<kind>` 是公司级原生运行期望，不属于 employee seat；当前可核验 adapter 为 Codex，必须同时声明 `model`、`reasoning_effort` 和 `on_drift=report|restart_idle`。`restart_idle` 只在 `idle|done` 安全边界替换运行实例，不中断 `working|blocked`。
+- Codex 出现 `Retry with a faster model / Dismiss and keep waiting` safety-buffering 界面时，HQ 固定采用“不降级、继续等待原模型”的策略。因为界面明确说明无需操作，HQ 不发送 `Esc`、数字键或 `Enter`；这些按键在界面自行消失后可能中断回合或进入输入框。该界面只被视为暂时遮挡 footer，不会触发 profile drift、runtime 重启或新的 Prompt 投递。
 - 可选 `runtime_fallback` 只替换稳定 seat 的模型运行载体，不修改 employee seat、Role Card、workstation 或 Assignment Contract；当 `auto=true` 时，HQ 只对可核验的 `content_safeguard` 终端状态触发一次保守切换。
 
 常用维护命令：
@@ -842,6 +843,16 @@ seat/workstation 重建。新会话收到基于 durable assignment/case 的 reco
 blocked 或 needs-decision 的历史 case 不会被误报为 active work。信封最多展开 8 项，超出的 actionable 工作
 只报告数量并要求通过 `hq inbox`/`hq assignment list` 读取，避免一次运行修复把历史账本灌入上下文。
 
+Codex 的 safety-buffering 选择器不是 profile 漂移。看到 `Retry with a faster model` 与
+`Dismiss and keep waiting` 的完整界面时，HQ 采用后者的语义：保持配置中的 model/effort，等待原请求完成。
+当前 Herdr 没有“仅当屏幕仍匹配时发送按键”的原子操作，而该界面本身写明 `No action is required`，所以 HQ
+不会模拟按键。这样既不会切换到 faster model，也避免选择器自行消失后 `Esc` 中断正常回合。等待期间 footer
+暂时不可见不会产生 `runtime_profile_unverified` 或 `runtime_profile_mismatch`；选择器消失后恢复正常核验。
+
+Gateway 的维护授权绑定稳定 seat identity，而不是永久 pane。若该 `can_manage_staff` seat 因 profile repair、
+重启或其他正常生命周期取得新 pane，周期守护会从实时 Herdr snapshot 刷新 `MaintenancePane` 后再投递内部
+nudge；找不到唯一实时 binding 时清空过期 pane 并暂停 nudge，绝不把旧 pane 当作授权身份继续使用。
+
 CloseTab definitely-not-run 进入 `profile_repair_failed` 并可由 watcher 安全重试；结果不明则进入
 `profile_repair_unknown`，禁止自动启动第二个 runtime。运维角色核验同一 incarnation/tab 仍在后，使用
 `hq --direct runtime repair-profile --agent <slug> --retry-unknown`。如旧 tab 已消失，watcher 用 snapshot
@@ -982,7 +993,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.1.0 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.1 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证
