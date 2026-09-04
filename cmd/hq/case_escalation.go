@@ -165,7 +165,7 @@ func (a *App) cmdCaseEscalate(args []string) error {
 		if request.Spec.Project != parent.Project {
 			return nil, conflictf("escalation child project 与 parent %s 不一致", parent.ID)
 		}
-		if err := ledger.rejectActiveAssignment(parent.ID, "发起上行 escalation"); err != nil {
+		if err := ledger.admitManagerEscalation(parent.ID, actor.Name, superior.Name, parent.Version, parent.Digest); err != nil {
 			return nil, err
 		}
 		if parent.Version != preflight.Version || parent.Digest != preflight.Digest || parent.LastEventID != preflight.LastEventID {

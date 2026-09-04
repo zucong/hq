@@ -1038,7 +1038,7 @@ func (s *ledgerState) validateAndApply(event Event, cfg Config) error {
 			state.Status != string(statusOpen) || event.FromState != state.Status {
 			return fmt.Errorf("case escalation 的 parent/owner/open 前态不匹配")
 		}
-		if err := s.rejectActiveAssignment(parent.ID, "发起上行 escalation"); err != nil {
+		if err := s.admitManagerEscalation(parent.ID, event.Actor, event.Recipient, parent.Version, parent.Digest); err != nil {
 			return err
 		}
 		created, createdOK := s.events[state.SpecEventID]

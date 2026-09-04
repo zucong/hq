@@ -236,6 +236,7 @@ func agentRoleCardManualWithProfile(companyName, workspace string, rule AgentRul
 		fmt.Fprintln(&b, "- **你 → 自己的精确直属 seat**：允许。创建子 case 后直接 `hq issue`，**不需要且不得申请或附加 approval/decision**。")
 		fmt.Fprintln(&b, "- **你 → 非直属 seat**：禁止。approval/decision 不能扩大经理的管理边界；跨部门返工必须对你当前持有的父 case 使用 `hq case escalate` 新建 durable 子 case 并固定上交直属上级，不能用 message 冒充所有权交接。")
 		fmt.Fprintln(&b, "- **你 → 自己的直属上级**：只允许 `hq case escalate`。HQ 不接受 `--to`，目标固定为 registry `reports_to`；旧 accepted report 与父 case 均不得倒转。")
+		fmt.Fprintln(&b, "  若父 case 来自直属上级给你的 assignment，先 `accept`；该合同处于 `accepted|rework` 且仍精确绑定当前 case version/digest 时，可在合同执行期间 `case escalate`。上交 child 后仍须对原 assignment 正常 `report`，由冻结 reviewer `accept/return`；escalation 不会替你完成原合同。")
 		fmt.Fprintln(&b, "- **总裁办 → 部门经理**：属于公司级委派，使用 owner approval 或已生效 standing decision；这不是部门内部派工的前置步骤。")
 		fmt.Fprintln(&b, "- **HQ 拒绝命令时**：停止重复同一动作，按报错中的纠正命令执行；不得继续申请 approval，也不得改用裸 Herdr prompt 尝试绕过。")
 		fmt.Fprintln(&b)
@@ -358,7 +359,7 @@ func companyAgentHandbook(plan initPlan) []byte {
 	fmt.Fprintln(&b, "ceo-office/tools/hq/bin/hq --direct runtime repair-profile --agent <seat> --retry-unknown")
 	fmt.Fprintln(&b, "```")
 	fmt.Fprintln(&b, "\n`issue --to` 选择的是一个已批准、直属且有容量的 employee seat。HQ 在 assignment 中冻结 seat version/digest 与 role card version/digest/manual；任务执行期间不能被 prompt 或角色卡升级静默改变。`on_assignment` seat 平时休眠，经理发出正式 issue 时 HQ 会自动通过 Herdr cold-resume 并递送门铃；没有第二条业务 activate 命令，不得显式 `hq up <on_assignment-seat>`，也不要另发裸 `herdr prompt` 派工。人类所有者或其明确授权代理可以在 seat 已由 HQ 激活后，用 Herdr prompt 补充精确外部工具权限；这不创建或改变 case/issue/assignment、digest、reviewer 或 acceptance。交付被验收后，没有未决任务/投递/行动型消息的 runtime 会在 keep-warm 后自动休眠，但 seat、角色卡和工位仍保留。若新 issue 因 `hibernate_attempting`/`hibernate_unknown` 被拒绝，该命令尚未写 origin 或预占 WIP；先执行 `runtime status --agent ...`，人工核对同一 incarnation 后再按报错用单 seat `--retry-unknown`，不得绕过。HQ 拒绝其他命令时，同样应按报错给出的纠正命令执行，不得继续申请 approval 或用 Herdr 绕过。")
-	fmt.Fprintln(&b, "\n跨部门返工不能倒转旧 `accepted` report，`message --kind handoff` 也不转移 durable owner。父 case 当前经理运行 `case escalate` 后，HQ 原子创建新子 case 并固定上交其 `reports_to`；直属上级先 accept 该 escalation，再按公司级 owner approval/standing decision issue 给自己的直属部门经理。failed/unknown 投递只恢复原 delivery，不重复创建 case。")
+	fmt.Fprintln(&b, "\n跨部门返工不能倒转旧 `accepted` report，`message --kind handoff` 也不转移 durable owner。父 case 当前经理运行 `case escalate` 后，HQ 原子创建新子 case 并固定上交其 `reports_to`；直属上级先 accept 该 escalation，再按公司级 owner approval/standing decision issue 给自己的直属部门经理。若父 case 是直属上级给当前经理的 active assignment，经理须先 accept；仅精确匹配当前 case generation 且处于 `accepted|rework` 的该合同允许执行 escalation。上交 child 不会消费原 assignment，经理仍须 report 并等待原 reviewer accept/return。failed/unknown 投递只恢复原 delivery，不重复创建 case。")
 	fmt.Fprintln(&b, "\n跨部门修复被验收后，总部 message 原部门经理只是在传递证据。原经理应在仍持有的质量 case 上 `case revise --version <N+1>`，再对直属复验 seat fresh `issue`；新 assignment 冻结新 version/digest，旧 finding submission 和旧 assignment 不变。任何要求旧员工凭 message 再次 report 的做法都会被 HQ 拒绝并返回这两条纠正命令。")
 	fmt.Fprintln(&b, "\n浏览器黑盒 assignment 的 acceptance/constraints 必须写明 `surface_id`、URL/scheme/origin、允许的浏览器工具与禁止 fallback。报告必须带 tool/browser/version 来源和可复现证据；允许工具拒绝该 surface 时只能报 blocked，禁止 raw CDP、remote-debugging port、自建 WebSocket 或换成其他 surface 补证。若需要人类工具授权，所有者或其明确授权代理可向当前会话发送仅含精确 surface/action 的 Herdr prompt；业务仍由原 HQ assignment 驱动。授权文本不能自动清除 connector 的 saved deny；设置变更后可重连当前 runtime，但不得借重连改换冻结 surface。经理必须 return 任何 provenance 不匹配的 PASS。")
 

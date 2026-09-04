@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.1.2 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.1.3 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -512,6 +512,10 @@ HQ 错误永远不会建议用裸 `herdr prompt` 绕过账本。
   --constraints <边界> --priority P1 --source <缺陷依据> \
   --reason <为何必须跨部门返工> --next <上级接手后的下一步>
 
+# 如果父 case 是直属上级正式 issue 给经理的，经理必须先 accept 原 assignment。
+# accepted|rework 执行态允许建立上述 escalation；上交后仍须对原 assignment report，
+# 由原 reviewer accept/return。escalation 不会暗中消费或完成原 assignment。
+
 # 跨部门修复验收后，message 只能通知原部门经理，不能复活旧 assignment。
 # 原 case 当前 owner 先建立新规格版本，再向直属复验 seat 发出 fresh issue。
 ./bin/hq case revise --id <quality-case-id> --version <N+1> \
@@ -994,7 +998,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.1.2 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.3 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证

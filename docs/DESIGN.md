@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.1.2 已正式发布；本文定义当前正式合同**
+状态：**v1.1.3 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -456,8 +456,13 @@ HQ 提供唯一的上行工作交接原语 `case escalate`：
        5. issue:                     accepted -> dispatched, owner=上级的直属经理
 ```
 
-调用者必须具有 `manager:<department>` 与 `can_create`，必须是父 case 当前 owner，父 case 不得 closed、
-不得存在 active assignment 或未收敛 business delivery。新 case 的 parent/root/spec/digest 与上行 intent
+调用者必须具有 `manager:<department>` 与 `can_create`，必须是父 case 当前 owner，父 case 不得 closed，
+也不得存在未收敛 business delivery。
+没有 active assignment 时可按 manager ownership 直接升级；存在 active assignment 时只允许唯一一份精确匹配
+当前 parent version/digest、recipient=当前经理、issuer/reviewer/acceptor=registry `reports_to` 且状态为
+`accepted|rework` 的直属上级合同。`issued` 必须先 accept，其他合同冲突全部 fail closed。这个例外只创建并上交
+新 child，不修改 parent，也不消费原 assignment；经理随后仍须对原 assignment 正常 `report`，由冻结 reviewer
+执行 `accept/return`。新 case 的 parent/root/spec/digest 与上行 intent
 在同一事务中冻结；strict replay 要求二者 sequence 紧邻、command digest 相同且 command id 为 batch 配对。
 目标参数不存在，recipient 必须精确等于调用者当前 `reports_to`，并具备继续路由 durable case 的能力。
 `case_escalation_prepared` 是 business delivery fence：failed/unknown 期间新 case 保持 open 且由原经理持有，
@@ -730,7 +735,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.1.2 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.1.3 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

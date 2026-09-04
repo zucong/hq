@@ -236,7 +236,7 @@ Agent 类型和权限模式。
 	caseCommand := group("case", "管理可分解、可委派的结构化事项")
 	caseCommand.AddCommand(
 		leaf("create", "创建唯一 project root 或其子 case", "case", "create"),
-		leaf("escalate", "经理创建返工子 case 并固定上交直属上级", "case", "escalate"),
+		leaf("escalate", "经理创建返工子 case 并固定上交直属上级；支持已接单的直属上级 assignment", "case", "escalate"),
 		leaf("revise", "追加 case 规格新版本", "case", "revise"),
 		leaf("show", "查看事项", "case", "show"),
 	)

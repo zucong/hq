@@ -1,10 +1,20 @@
-# HQ v1.1.2 正式发布与安装
+# HQ v1.1.3 正式发布与安装
 
-HQ v1.1.2 是经理运行恢复修复版本：保留 v1.1.1 的全部 CLI、registry v3、event v3
-及公司实例合同，同时让 provider safeguard fallback 能恢复经理对未完成下属 assignment 的监督责任。本文定义它的构建、
+HQ v1.1.3 是经理 assignment 上行升级修复版本：保留 v1.1.2 的全部 CLI、registry v3、event v3
+及公司实例合同，同时消除经理执行直属上级 assignment 时无法创建 durable escalation 的控制面循环。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.1.3 经理 assignment 上行升级修复
+
+- `case escalate` 在 parent 没有 active assignment 时保持原 manager ownership 规则；
+- parent 存在 active assignment 时，仅放行直属上级签发给当前经理、冻结同一 case version/digest、并已处于
+  `accepted|rework` 执行态的唯一合同，其他组合继续 fail closed；
+- escalation 只原子创建并上交 child，不修改 parent、不消费原 assignment；经理随后仍须按原合同 report，
+  冻结 reviewer 继续执行 accept/return；
+- `issued` 状态的经理会获得可直接执行的 `hq accept --event ...` 纠正命令，避免先 report、虚假完成或创建替代案；
+- strict replay 与真实状态回归覆盖“上级派经理处理 → 经理 accept → escalation → 原 assignment report/review”的完整闭环。
 
 ## v1.1.2 经理运行恢复修复
 
@@ -33,7 +43,7 @@ HQ v1.1.2 是经理运行恢复修复版本：保留 v1.1.1 的全部 CLI、regi
 
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.1.2 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 v1.1.3 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -50,8 +60,8 @@ fail closed，并由公司所有者明确从 v1.1.2 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.1.2 <完整小写commit> /tmp/hq-v1.1.2-release
-./scripts/release.sh verify /tmp/hq-v1.1.2-release
+./scripts/release.sh build v1.1.3 <完整小写commit> /tmp/hq-v1.1.3-release
+./scripts/release.sh verify /tmp/hq-v1.1.3-release
 ./scripts/test-gates.sh
 ```
 

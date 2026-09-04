@@ -150,7 +150,7 @@ func TestDocumentationContractNamesFormalReleaseArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := string(raw)
-	for _, want := range []string{"v1.1.2", "/tmp/hq-v1.1.2-release", "经理运行恢复修复版本", "v1.1.1 运行守护修复"} {
+	for _, want := range []string{"v1.1.3", "/tmp/hq-v1.1.3-release", "经理 assignment 上行升级修复版本", "v1.1.2 经理运行恢复修复"} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("RELEASE.md missing first-release contract %q", want)
 		}
@@ -224,7 +224,7 @@ func TestDocumentationContractPublishesDurableManagerEscalation(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(raw)
-		for _, want := range []string{"case escalate", "accepted", "reports_to", "case_escalation_prepared", "case revise --version <N+1>", "fresh issue", "旧 assignment"} {
+		for _, want := range []string{"case escalate", "accepted", "reports_to", "case_escalation_prepared", "accepted|rework", "原 assignment", "case revise --version <N+1>", "fresh issue", "旧 assignment"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing manager escalation contract %q", path, want)
 			}
@@ -238,7 +238,7 @@ func TestDocumentationContractPublishesDurableManagerEscalation(t *testing.T) {
 		t.Fatalf("case escalate help wrote stderr: %s", errOut.String())
 	}
 	help := out.String()
-	for _, want := range []string{"--parent", "--reason", "--next", "直属上级"} {
+	for _, want := range []string{"--parent", "--reason", "--next", "直属上级", "已接单"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("case escalate help missing %q:\n%s", want, help)
 		}

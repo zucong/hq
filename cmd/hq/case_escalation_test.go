@@ -218,6 +218,132 @@ func TestManagerEscalationVirtualCompanyReworkAndReverify(t *testing.T) {
 	}
 }
 
+func assignedManagerEscalationFixture(t *testing.T, parentID string) (testEnv, Config, AgentRule, AgentRule, Event, string) {
+	t.Helper()
+	e := setupTestEnv(t)
+	cfg := Config{
+		Version: registrySchemaVersion, WorkspaceLabel: "hq-test", OwnerPrincipal: "ZC",
+		Agents: []AgentRule{
+			{Name: "owner-channel", Label: "总部联络职责位", Nickname: "联络官", DepartmentLabel: "总裁办", Workspace: "hq-test", Responsibilities: []string{roleApprovalWitness, roleAccountCloser, "operations_manager"}, Department: "ceo-office", Kind: "codex", CanCreate: true, CanIssue: true, CanAccept: true, CanClose: true, CanManageStaff: true, CanReceiveOrder: true},
+			{Name: "delivery-manager", Label: "交付部负责人", Nickname: "交付负责人", DepartmentLabel: "交付部", Workspace: "hq-test", Responsibilities: []string{"manager:delivery"}, Department: "delivery", ReportsTo: "owner-channel", Kind: "codex", CanCreate: true, CanAccept: true, CanReceiveOrder: true},
+		},
+	}
+	cfg = bindTestRoleContracts(cfg)
+	writeTestConfig(t, e.config, cfg)
+	for _, rule := range cfg.Agents {
+		writeTestFile(t, filepath.Join(e.root, rule.ManualPath), string(testRoleManual(rule.Name)))
+	}
+	liaison, manager := cfg.Agents[0], cfg.Agents[1]
+	source := writeTestFile(t, filepath.Join(e.root, manager.Department, "assigned-manager-escalation.md"), "# Escalation evidence\n")
+	e.setActor(t, liaison.Name, "escalation:owner-channel", filepath.Join(e.root, liaison.Department))
+	runTestCommand(t, e, "case", "create", "--id", parentID, "--title", "经理合同中的上行升级", "--project", "manager-escalation", "--source", source)
+	expires := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	runTestCommand(t, e, "approval", "request", "--id", "APR-"+parentID, "--case", parentID, "--target", manager.Name, "--expires", expires)
+	runTestCommand(t, e, "approval", "grant", "--id", "APR-"+parentID, "--issuer", cfg.ownerPrincipal())
+	runTestCommand(t, e, "issue", "--case", parentID, "--to", manager.Name, "--approval", "APR-"+parentID, "--next", "核验并按需建立上行整改")
+	events := scenarioEvents(t, e, cfg)
+	return e, cfg, liaison, manager, latestCaseEvent(events, parentID, "issue_sent"), source
+}
+
+func TestManagerCanEscalateWithinAcceptedSuperiorAssignment(t *testing.T) {
+	const parentID = "ESC-ASSIGNED-MANAGER-PARENT"
+	const childID = "ESC-ASSIGNED-MANAGER-CHILD"
+	e, cfg, liaison, manager, issue, source := assignedManagerEscalationFixture(t, parentID)
+	artifact := writeTestFile(t, filepath.Join(e.root, manager.Department, "assigned-manager-result.md"), "# Escalation submitted\n")
+
+	e.setActor(t, manager.Name, "escalation:assigned-manager", filepath.Join(e.root, manager.Department))
+	runTestCommand(t, e, "accept", "--event", issue.ID, "--next", "核验后上交跨部门整改")
+	runTestCommand(t, e, escalationCommand(parentID, childID, source)...)
+
+	ledger, err := e.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, child := ledger.snapshot.Cases[parentID], ledger.snapshot.Cases[childID]
+	assignment := ledger.assignments[issue.ID]
+	if parent == nil || parent.Status != string(statusInProgress) || parent.Owner != manager.Name {
+		t.Fatalf("escalation rewrote assigned parent: %+v", parent)
+	}
+	if child == nil || child.Status != string(statusEscalated) || child.Owner != liaison.Name || child.ParentCaseID != parentID {
+		t.Fatalf("assigned manager escalation did not reach superior: %+v", child)
+	}
+	if assignment == nil || assignment.Status != "accepted" || assignment.Consumed {
+		t.Fatalf("escalation consumed the manager assignment before its report: %+v", assignment)
+	}
+
+	// The escalation satisfies work inside the manager's original contract; the
+	// manager still closes that contract through the ordinary report/review path.
+	runTestCommand(t, e, "report", "--case", parentID, "--result", "completed", "--artifact", artifact,
+		"--verify", "durable escalation child reached the registered superior", "--next", "review manager assignment")
+	events := scenarioEvents(t, e, cfg)
+	report := latestCaseEvent(events, parentID, "report_sent")
+	e.setActor(t, liaison.Name, "escalation:assigned-manager-reviewer", filepath.Join(e.root, liaison.Department))
+	runTestCommand(t, e, "accept", "--event", report.ID, "--next", "route escalated child")
+
+	ledger, err = e.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assignment = ledger.assignments[issue.ID]; assignment == nil || assignment.Status != "completed" || !assignment.Consumed {
+		t.Fatalf("manager assignment did not converge after escalation report: %+v", assignment)
+	}
+	if _, err := NewStore(e.data).Rebuild(cfg); err != nil {
+		t.Fatalf("strict rebuild rejected assigned manager escalation: %v", err)
+	}
+}
+
+func TestManagerEscalationRejectsUnacceptedAssignmentWithExecutableRecovery(t *testing.T) {
+	const parentID = "ESC-UNACCEPTED-MANAGER-PARENT"
+	const childID = "ESC-UNACCEPTED-MANAGER-CHILD"
+	e, _, _, manager, issue, source := assignedManagerEscalationFixture(t, parentID)
+
+	e.setActor(t, manager.Name, "escalation:unaccepted-manager", filepath.Join(e.root, manager.Department))
+	before := snapshotTree(t, e.data)
+	err := e.app(t).run(escalationCommand(parentID, childID, source))
+	if err == nil || !strings.Contains(err.Error(), "status=issued") ||
+		!strings.Contains(err.Error(), "hq accept --event "+issue.ID) ||
+		!strings.Contains(err.Error(), "重试原 `hq case escalate`") {
+		t.Fatalf("unaccepted manager assignment error was not executable: %v", err)
+	}
+	if after := snapshotTree(t, e.data); !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected unaccepted-assignment escalation changed durable state")
+	}
+}
+
+func TestManagerCanEscalateWithinReturnedSuperiorAssignment(t *testing.T) {
+	const parentID = "ESC-REWORK-MANAGER-PARENT"
+	const childID = "ESC-REWORK-MANAGER-CHILD"
+	e, cfg, liaison, manager, issue, source := assignedManagerEscalationFixture(t, parentID)
+
+	e.setActor(t, manager.Name, "escalation:rework-manager", filepath.Join(e.root, manager.Department))
+	runTestCommand(t, e, "accept", "--event", issue.ID, "--next", "核验是否需要升级")
+	runTestCommand(t, e, "report", "--case", parentID, "--result", "blocked", "--source", source,
+		"--note", "需要直属上级确认升级路径", "--next", "review and return with escalation instruction")
+	events := scenarioEvents(t, e, cfg)
+	report := latestCaseEvent(events, parentID, "report_sent")
+
+	e.setActor(t, liaison.Name, "escalation:rework-reviewer", filepath.Join(e.root, liaison.Department))
+	runTestCommand(t, e, "return", "--event", report.ID, "--reason", "请在原经理合同内建立 durable escalation", "--next", "accept rework and escalate")
+
+	e.setActor(t, manager.Name, "escalation:rework-manager", filepath.Join(e.root, manager.Department))
+	runTestCommand(t, e, escalationCommand(parentID, childID, source)...)
+	ledger, err := e.app(t).ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment := ledger.assignments[issue.ID]
+	child := ledger.snapshot.Cases[childID]
+	if assignment == nil || assignment.Status != "rework" || assignment.Consumed {
+		t.Fatalf("escalation did not preserve returned manager assignment: %+v", assignment)
+	}
+	if child == nil || child.Status != string(statusEscalated) || child.Owner != liaison.Name {
+		t.Fatalf("rework manager escalation did not reach superior: %+v", child)
+	}
+	if _, err := NewStore(e.data).Rebuild(cfg); err != nil {
+		t.Fatalf("strict rebuild rejected rework manager escalation: %v", err)
+	}
+}
+
 func TestCaseEscalationStrictReplayRejectsTargetAndAtomicPairForgery(t *testing.T) {
 	e := setupTestEnv(t)
 	cfg := configureEscalationTestCompany(t, e)
