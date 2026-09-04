@@ -396,9 +396,9 @@ func TestDeliveryPolicyAdaptiveBusyMergeAndWakeBudget(t *testing.T) {
 		}
 	})
 
-	t.Run("budget exhaustion downgrades notification but not issue contract", func(t *testing.T) {
+	t.Run("successful standalone wakeup resets the consecutive budget", func(t *testing.T) {
 		e := setupTestEnv(t)
-		setDeliveryPolicy(t, e, deliveryModeAuto, 2)
+		setDeliveryPolicy(t, e, deliveryModeAuto, 1)
 		app := deliveryPolicyTestApp(t, e, "eng-developer", "delivery:budget-sender")
 		app.DeliveryTargetState = func(string) (deliveryRuntimeState, error) { return deliveryRuntimeIdle, nil }
 		for _, body := range []string{"wake-1", "wake-2", "wake-3"} {
@@ -406,24 +406,55 @@ func TestDeliveryPolicyAdaptiveBusyMergeAndWakeBudget(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if len(e.transport.calls) != 2 {
-			t.Fatalf("budget did not cap wakes: %d", len(e.transport.calls))
+		if len(e.transport.calls) != 3 {
+			t.Fatalf("successful turn boundaries left the wake budget stuck: %d", len(e.transport.calls))
 		}
 		messages := deliveryPolicyMessages(t, e)
-		if messages[2].DeliveryMode != deliveryModeInject || messages[2].DeliveryReason != "wake-budget-exhausted" {
-			t.Fatalf("third wake not downgraded: %+v", messages[2])
+		for _, message := range messages {
+			if message.DeliveryMode != deliveryModeWakeup {
+				t.Fatalf("standalone wake was unexpectedly downgraded: %+v", message)
+			}
 		}
 		query := deliveryPolicyTestApp(t, e, "eng-developer", "delivery:budget-query")
 		budget, err := runDeliveryPolicyTest(query, "delivery", "budget", "status", "--target", "zantianyou")
-		if err != nil || !strings.Contains(budget, "wakes=2/2") || !strings.Contains(budget, "downgrade=true") {
+		if err != nil || !strings.Contains(budget, "wakes=0/1") || strings.Contains(budget, "downgrade=true") {
+			t.Fatalf("budget query=%q err=%v", budget, err)
+		}
+	})
+
+	t.Run("in-flight wake exhaustion queues until target consumes context", func(t *testing.T) {
+		e := setupTestEnv(t)
+		setDeliveryPolicy(t, e, deliveryModeAuto, 1)
+		app := deliveryPolicyTestApp(t, e, "eng-developer", "delivery:budget-inflight")
+		app.DeliveryTargetState = func(string) (deliveryRuntimeState, error) { return deliveryRuntimeIdle, nil }
+		app.DeliveryFailpoint = func(name string) error {
+			if name == "after_attempt_recorded" {
+				return errors.New("synthetic in-flight wake")
+			}
+			return nil
+		}
+		if _, err := runDeliveryPolicyTest(app, "message", "--to", "zantianyou", "--kind", "request", "--text", "wake-in-flight", "--delivery", "wakeup"); err == nil {
+			t.Fatal("in-flight wake fixture did not stop after attempted")
+		}
+		if _, err := runDeliveryPolicyTest(app, "message", "--to", "zantianyou", "--kind", "request", "--text", "queued-action", "--delivery", "wakeup"); err != nil {
+			t.Fatal(err)
+		}
+		messages := deliveryPolicyMessages(t, e)
+		if len(messages) != 2 || messages[1].DeliveryMode != deliveryModeInject || messages[1].DeliveryReason != "wake-budget-exhausted" {
+			t.Fatalf("action was not durably downgraded behind the in-flight wake: %+v", messages)
+		}
+		query := deliveryPolicyTestApp(t, e, "eng-developer", "delivery:budget-query")
+		budget, err := runDeliveryPolicyTest(query, "delivery", "budget", "status", "--target", "zantianyou")
+		if err != nil || !strings.Contains(budget, "wakes=1/1") || !strings.Contains(budget, "downgrade=true") {
 			t.Fatalf("budget query=%q err=%v", budget, err)
 		}
 		consumer := deliveryPolicyTestApp(t, e, "zantianyou", "delivery:budget-target")
-		if _, err := runDeliveryPolicyTest(consumer, "delivery", "consume"); err != nil {
-			t.Fatal(err)
+		output, err := runDeliveryPolicyTest(consumer, "delivery", "consume")
+		if err != nil || !strings.Contains(output, "queued-action") {
+			t.Fatalf("consume output=%q err=%v", output, err)
 		}
 		budget, err = runDeliveryPolicyTest(query, "delivery", "budget", "status", "--target", "zantianyou")
-		if err != nil || !strings.Contains(budget, "wakes=0/2") {
+		if err != nil || !strings.Contains(budget, "wakes=0/1") {
 			t.Fatalf("natural wake did not reset budget: %q err=%v", budget, err)
 		}
 	})
@@ -908,8 +939,8 @@ func TestDeliveryPolicyConsumeWriterFailureClaimsOnlyProvenContext(t *testing.T)
 		if got := countDeliveryEvents(t, e, "delivery_context_claimed"); got != 1 {
 			t.Fatalf("claimed after text failure=%d want=1", got)
 		}
-		if got := countDeliveryEvents(t, e, "delivery_budget_reset"); got != 0 {
-			t.Fatalf("budget reset before boundary completion=%d", got)
+		if got := countDeliveryEvents(t, e, "delivery_budget_reset"); got != 1 {
+			t.Fatalf("writer failure changed the standalone-wake reset count=%d", got)
 		}
 
 		retry := deliveryPolicyTestApp(t, e, "zantianyou", "delivery:text-consumer")
@@ -924,7 +955,7 @@ func TestDeliveryPolicyConsumeWriterFailureClaimsOnlyProvenContext(t *testing.T)
 			t.Fatalf("claimed after retry=%d want=3", got)
 		}
 		if got := countDeliveryEvents(t, e, "delivery_budget_reset"); got != 1 {
-			t.Fatalf("budget reset after completed retry=%d want=1", got)
+			t.Fatalf("context retry duplicated the standalone-wake reset=%d", got)
 		}
 	})
 
@@ -940,8 +971,8 @@ func TestDeliveryPolicyConsumeWriterFailureClaimsOnlyProvenContext(t *testing.T)
 		if got := countDeliveryEvents(t, e, "delivery_context_claimed"); got != 0 {
 			t.Fatalf("JSON failure claimed unproven items=%d", got)
 		}
-		if got := countDeliveryEvents(t, e, "delivery_budget_reset"); got != 0 {
-			t.Fatalf("JSON failure reset budget=%d", got)
+		if got := countDeliveryEvents(t, e, "delivery_budget_reset"); got != 1 {
+			t.Fatalf("JSON failure changed the standalone-wake reset count=%d", got)
 		}
 
 		retry := deliveryPolicyTestApp(t, e, "zantianyou", "delivery:json-consumer")
@@ -1101,7 +1132,7 @@ func TestDeliveryPolicyCLI(t *testing.T) {
 		t.Fatalf("public binary mode model turns=%d want wakeup/quiet/inject=1/0/0", got)
 	}
 	budget := runPublic("delivery:public-sender", "delivery", "budget", "status", "--target", "zantianyou")
-	if !strings.Contains(budget, "target=zantianyou") || !strings.Contains(budget, "wakes=1/3") {
+	if !strings.Contains(budget, "target=zantianyou") || !strings.Contains(budget, "wakes=0/3") {
 		t.Fatalf("public budget status did not reach handler: %q", budget)
 	}
 	first := runPublic("delivery:public-target", "delivery", "consume", "--limit", "1")

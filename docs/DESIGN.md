@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.2.0 已正式发布；本文定义当前正式合同**
+状态：**v1.2.1 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -615,6 +615,14 @@ prefix。sent 或 resolved-delivered 会在一个 journal batch 中生成所选 
 2 KiB 仍限制单条用户 `message --text`。这是 HQ ledger 内的 exactly-once context consumption，不是外部
 Herdr Prompt 的 transport exactly-once；ambiguous 结果仍必须人工核对。
 
+成功的 wakeup 本身就是已证明的回合边界，无论 manifest 是否选中了 pending context，都必须在同一 terminal
+batch 中写入 `delivery_budget_reset`。预算因此只覆盖尚未成功形成回合边界的并发/不确定唤醒，不会按公司运行
+寿命永久累计。对已经因 `wake-budget-exhausted` 降为 inject 的 `question|request|handoff|directive`，独立
+queued-action watchdog 以最早 pending delivery 为稳定 basis：目标精确在岗且 `idle|done` 超时后，用 durable
+nudge 要求其运行 `hq delivery consume`；有界重试后沿 `reports_to` 升级。调用者明确选择的 quiet/inject 不在
+该恢复投影中。存在这类 pending action 时，assignment-progress 和 manager-queue 守卫不得并行发送基于旧状态的
+通用催办。
+
 issue 的 transport `sent` 与员工 activation 分层记账。`issue_sent` 创建唯一 Assignment Contract；若超时仍为
 `issued`，而已记账 runtime 已消失，gateway watcher 会先收敛旧 session，再凭该冻结 assignment cold-resume 同一
 seat。只有新旧任一精确 session/incarnation 在线、Herdr status 为 idle/done 且终端证据为正常输入页时，才重放
@@ -780,7 +788,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.2.0 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.1 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

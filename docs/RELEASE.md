@@ -1,10 +1,20 @@
-# HQ v1.2.0 正式发布与安装
+# HQ v1.2.1 正式发布与安装
 
-HQ v1.2.0 是加急在途变更版本：保留 v1.1.5 的 registry v3、event v3 与公司实例合同，
-增加绑定 active assignment 的加急指令，以及可审计、不可回退的 assignment replacement。本文定义它的构建、
+HQ v1.2.1 是 v1.2.0 的投递活性修复版本：保留 registry v3、event v3 与公司实例合同，
+修复连续唤醒预算的回合边界重置，并为被预算降级的行动消息增加可审计的延迟唤醒。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.2.1 投递活性修复
+
+- 每个成功 wakeup 即使未合并 pending context，也在 delivery terminal 的同一原子 batch 中写入
+  `delivery_budget_reset`，避免预算按进程寿命永久累积；
+- gateway 新增 queued-action watchdog：只恢复因 `wake-budget-exhausted` 降级的行动消息，在目标
+  `idle|done` 且超时后发送去重、有界的 durable nudge，要求目标用 `hq delivery consume` 取得 FIFO 原文；
+- 显式 `quiet|inject` 保持调用者要求的静默语义；待消费行动消息优先于通用 assignment/manager 催办，避免旧上下文
+  驱动错误推进；
+- 回归覆盖无 bundle 的连续成功 wake、尚未收敛 wake 导致的预算降级、延迟恢复、去重，以及显式 inject 不被提升。
 
 ## v1.2.0 加急在途变更
 
@@ -80,7 +90,7 @@ HQ v1.2.0 是加急在途变更版本：保留 v1.1.5 的 registry v3、event v3
 
 本次正式发布验收的是 HQ 控制面与 Herdr 执行面的组织协议，不把外部 Chrome connector 的逐会话
 saved-permission 状态或 Herdr 尚未提供的原子 conditional close 伪装成 HQ 能力。真实 R4 中这些路径均
-fail closed，并由公司所有者明确从 v1.2.0 的 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
+fail closed，并由公司所有者明确从 HQ 发布门禁中豁免；对应业务 case 与证据仍保留原阻断状态。
 
 ## 发布原则
 
@@ -97,8 +107,8 @@ fail closed，并由公司所有者明确从 v1.2.0 的 HQ 发布门禁中豁免
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.2.0 <完整小写commit> /tmp/hq-v1.2.0-release
-./scripts/release.sh verify /tmp/hq-v1.2.0-release
+./scripts/release.sh build v1.2.1 <完整小写commit> /tmp/hq-v1.2.1-release
+./scripts/release.sh verify /tmp/hq-v1.2.1-release
 ./scripts/test-gates.sh
 ```
 

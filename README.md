@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.2.0 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.2.1 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -592,6 +592,13 @@ trigger=assignment_progress` 指示其只从原 assignment、工位文件和 led
 不替经理验收，也不允许人工 `nudge` 绕过 `issue` 建立工作合同。该恢复信封同样遵守 actionable-only、
 最多展开 8 项并让 Agent 从 ledger 查询溢出项的合同。
 
+连续唤醒预算只限制尚未形成成功回合边界的重复唤醒；每次成功的 wakeup 即使没有合并 quiet/inject 上下文，
+也会与 delivery terminal 在同一事务中重置预算，不能把正常的长期协作累计成永久耗尽。若旧账本或并发窗口中
+仍有 `wake-budget-exhausted` 产生的行动型静默消息，gateway 的 queued-action watchdog 会在同一 queue timeout
+后，仅当精确目标为 `idle|done` 时发送去重、有界的 durable nudge，要求接收方先运行 `hq delivery consume`
+按 FIFO 取得原指令；未消费则有界重试并沿 `reports_to` 升级。显式由调用者选择的 `quiet|inject` 不会被该守卫
+擅自升级为唤醒；存在上述待消费行动消息时，通用 assignment/manager 催办也会让位，避免要求 Agent 按旧上下文推进。
+
 经理和总部联络职责位不能只靠角色手册自觉清空队列。gateway 的 manager queue watchdog 会严格重放账本，
 识别三类 durable 待办：等待 accept/return 的下属 submission、经理本人尚未接单或尚未 report 的 assignment，
 以及经理新建但尚未形成 active assignment 的 `open` case。`accepted`、`blocked`、`escalated` 等历史或待外部动作
@@ -1038,7 +1045,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.2.0 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.1 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证

@@ -523,6 +523,10 @@ func (a *App) runManagerQueueWatchdogOnce(ctx context.Context) error {
 	if len(backlogs) == 0 {
 		return nil
 	}
+	queuedActionTargets := map[string]bool{}
+	for _, pending := range ledger.queuedWakeBudgetActions(a.Config) {
+		queuedActionTargets[pending.Target] = true
+	}
 	snapshot, err := a.herdrSnapshot(ctx)
 	if err != nil {
 		return err
@@ -531,6 +535,12 @@ func (a *App) runManagerQueueWatchdogOnce(ctx context.Context) error {
 	stallAfter, escalateAfter, maxNudges := a.Config.managerQueueWatchdogPolicy()
 	failures := make([]string, 0)
 	for _, backlog := range backlogs {
+		// Preserve FIFO instruction semantics: a manager with an actionable
+		// budget-downgraded message must consume that context before a generic
+		// queue reminder asks it to advance older state.
+		if queuedActionTargets[backlog.Manager] {
+			continue
+		}
 		status, statusErr := liveQueueTargetStatus(snapshot, a.Config, a.HQRoot, backlog.Manager)
 		if statusErr != nil || (status != "idle" && status != "done") {
 			continue

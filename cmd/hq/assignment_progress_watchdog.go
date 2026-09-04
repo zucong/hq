@@ -171,6 +171,10 @@ func (a *App) runAssignmentProgressWatchdogOnce(ctx context.Context) error {
 	if err != nil || len(backlogs) == 0 {
 		return err
 	}
+	queuedActionTargets := map[string]bool{}
+	for _, pending := range ledger.queuedWakeBudgetActions(a.Config) {
+		queuedActionTargets[pending.Target] = true
+	}
 	snapshot, err := a.herdrSnapshot(ctx)
 	if err != nil {
 		return err
@@ -179,6 +183,12 @@ func (a *App) runAssignmentProgressWatchdogOnce(ctx context.Context) error {
 	stallAfter, escalateAfter, maxNudges := a.Config.managerQueueWatchdogPolicy()
 	failures := make([]string, 0)
 	for _, backlog := range backlogs {
+		// The delayed-delivery guard must first wake the worker to consume the
+		// manager's exact FIFO instruction. A generic "report" nudge in parallel
+		// could make the worker act on stale context.
+		if queuedActionTargets[backlog.Agent] {
+			continue
+		}
 		selectedAt, parseErr := parseOperationsTime("assignment progress selected_at", backlog.SelectedAt)
 		if parseErr != nil {
 			return parseErr

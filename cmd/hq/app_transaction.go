@@ -581,7 +581,12 @@ func (a *App) appendDeliveryTerminal(origin, attempt Event, state string, cause 
 	store := a.durableRecoveryStore()
 	commandID := "delivery-terminal:" + attempt.ID + ":" + state
 	digest := requestDigest("delivery-terminal", origin.DeliveryID, attempt.ID, state)
-	if state == deliverySent && hasTurnBundleManifest(attempt) && len(attempt.TurnBundleDeliveryIDs) > 0 {
+	// Every successful wakeup is a proven turn boundary, even when there was no
+	// pending quiet/inject context to bundle.  Converge that boundary through a
+	// batch so delivery_budget_reset is recorded together with the terminal;
+	// otherwise standalone wakeups accumulate forever and eventually strand an
+	// actionable message in the silent queue.
+	if state == deliverySent && hasTurnBundleManifest(attempt) {
 		batchStore, ok := store.(batchEventStore)
 		if !ok {
 			return Event{}, fmt.Errorf("Store 不支持原子多事件恢复事务，fail-closed")

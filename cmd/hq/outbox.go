@@ -86,6 +86,9 @@ func describeDelivery(record *deliveryRecord) (string, string) {
 	case deliveryPrepared:
 		return "消息已记入 HQ，但尚未开始外部投递", "HQ 将开始投递"
 	case deliveryQueued:
+		if record.Origin.Type == "message_prepared" && record.Origin.DeliveryReason == "wake-budget-exhausted" && messageNeedsAction(record.Origin.MessageKind) {
+			return "行动消息因连续唤醒预算耗尽进入静默队列；gateway 会在超时且目标 idle|done 后用 durable nudge 延迟唤醒", "接收方被唤醒后运行 hq delivery consume，按 FIFO 执行；不要重发原消息"
+		}
 		return "消息正在静默队列中，不会主动唤醒接收方", "HQ 会在下一次唤醒 prompt 或 accept 输出中自动合并；delivery consume 仅用于人工恢复"
 	case deliveryAttempted:
 		return "已尝试外部投递，但尚无可证明的终态", "等待 reconcile；不要盲目重发"

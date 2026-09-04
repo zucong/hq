@@ -1016,7 +1016,7 @@ func (s *ledgerState) validateTurnBundleFinalInvariants() error {
 // can never observe a sent parent with pending manifest context.
 func (a *App) buildTurnBundleConvergenceEvents(ledger *ledgerState, parent *deliveryRecord) ([]Event, error) {
 	attempt := parent.Attempt
-	if !hasTurnBundleManifest(attempt) || len(attempt.TurnBundleDeliveryIDs) == 0 {
+	if !hasTurnBundleManifest(attempt) {
 		return nil, nil
 	}
 	targetRule, ok := historicalRule(a.Config, parent.Origin.Recipient)
@@ -1024,7 +1024,7 @@ func (a *App) buildTurnBundleConvergenceEvents(ledger *ledgerState, parent *deli
 		return nil, fmt.Errorf("turn bundle target 未登记：%s", parent.Origin.Recipient)
 	}
 	claimActor := Actor{Name: targetRule.Name, Label: targetRule.Label, Department: targetRule.Department, Rule: targetRule}
-	result := make([]Event, 0, len(attempt.TurnBundleDeliveryIDs)*3)
+	result := make([]Event, 0, len(attempt.TurnBundleDeliveryIDs)*3+1)
 	for index, deliveryID := range attempt.TurnBundleDeliveryIDs {
 		record := ledger.deliveries[deliveryID]
 		if record == nil || record.Origin.Type != "message_prepared" || record.Origin.Recipient != parent.Origin.Recipient ||
