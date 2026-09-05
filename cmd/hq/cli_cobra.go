@@ -492,6 +492,8 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 		addString("approval", "生效 decisions 文件（必填）")
 	case "staff update":
 		addString("name", "稳定 agent slug（必填；不可原地改名）")
+		addString("model", "员工模型；必须同时指定 --effort；直属经理或 can_manage_staff 可设置无在途任务员工")
+		addString("effort", "none|minimal|low|medium|high|xhigh；仅与 --name/--model 一起使用")
 		addString("label", "新发件标识")
 		addString("department", "新工位目录")
 		addString("kind", "新启动 kind")
@@ -506,7 +508,7 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 		addString("revoke", "撤销权限，逗号分隔")
 		addBool("enable", "重新启用")
 		addBool("disable", "停用")
-		addString("approval", "生效 decisions 文件（必填）")
+		addString("approval", "人事变更必填的生效 decisions 文件；纯 --model/--effort 调整不使用")
 	case "staff remove":
 		addString("name", "稳定 agent slug（必填）")
 		addString("approval", "生效 decisions 文件（必填）")
@@ -637,7 +639,9 @@ func requiredFlags(path ...string) []string {
 		return []string{"name"}
 	case "staff add":
 		return []string{"name", "label", "department", "role", "workstation", "approval"}
-	case "staff update", "staff remove":
+	case "staff update":
+		return []string{"name"}
+	case "staff remove":
 		return []string{"name", "approval"}
 	case "role show":
 		return []string{"role"}
@@ -824,6 +828,14 @@ func validateConditionalFlags(cmd *cobra.Command, path ...string) error {
 		return enum("activation", false, activationAlways, activationOnAssignment, activationManual)
 	case "staff update":
 		enable, _ := cmd.Flags().GetBool("enable")
+		if cmd.Flags().Changed("model") || cmd.Flags().Changed("effort") {
+			model, _ := cmd.Flags().GetString("model")
+			effort, _ := cmd.Flags().GetString("effort")
+			return validateRuntimeUpdateFlags(cmd.Flags(), model, effort)
+		}
+		if err := validateRequiredFlags(cmd, []string{"approval"}); err != nil {
+			return err
+		}
 		disable, _ := cmd.Flags().GetBool("disable")
 		if enable && disable {
 			return usagef("--enable 与 --disable 不能同时使用")

@@ -1,6 +1,17 @@
 version: 3
 workspace_label: example-hq
 owner_principal: Ada
+# 可选：启用公司默认模型后，直属经理可用 staff update --model/--effort
+# 为员工写入 employees 覆盖。模型 ID 请使用当前运行环境实际提供的值。
+# runtime_profiles:
+#     codex:
+#         model: <native-model-id>
+#         reasoning_effort: medium
+#         on_drift: restart_idle
+#         employees:
+#             example-delivery-specialist:
+#                 model: <review-model-id>
+#                 reasoning_effort: medium
 runtime_fallback:
     auto: true
     trigger: content_safeguard

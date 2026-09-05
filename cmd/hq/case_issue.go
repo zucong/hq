@@ -187,6 +187,9 @@ func (a *App) cmdIssue(args []string) error {
 			releaseOriginFence()
 		}
 	}()
+	if err := a.ensureEmployeeModelReady(targetRule); err != nil {
+		return err
+	}
 	result, err := a.transactBatch(commandID, digest, func(ledger *ledgerState) ([]Event, error) {
 		if _, err := verifyAgentRoleCardArtifact(a.Config, a.HQRoot, targetRule); err != nil {
 			return nil, fmt.Errorf("接收方角色卡在 issue admission 期间漂移：%w", err)

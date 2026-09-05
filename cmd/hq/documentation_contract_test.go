@@ -150,7 +150,7 @@ func TestDocumentationContractNamesFormalReleaseArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := string(raw)
-	for _, want := range []string{"v1.2.2", "/tmp/hq-v1.2.2-release", "v1.2.2 销账空闲边界重武装", "v1.2.1 投递活性修复", "v1.2.0 加急在途变更", "v1.1.5 事件驱动的经理停车"} {
+	for _, want := range []string{"v1.2.3 员工模型覆盖", "/tmp/hq-v1.2.3-release", "v1.2.2 销账空闲边界重武装", "v1.2.1 投递活性修复", "v1.2.0 加急在途变更", "v1.1.5 事件驱动的经理停车"} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("RELEASE.md missing first-release contract %q", want)
 		}

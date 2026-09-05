@@ -54,6 +54,19 @@ func validateRuntimeProfiles(cfg Config) error {
 		if policy.OnDrift != runtimeProfileDriftReport && policy.OnDrift != runtimeProfileDriftRestartIdle {
 			return fmt.Errorf("%s.on_drift 必须是 report|restart_idle；需要 HQ 在安全 idle|done 边界自动恢复时使用 restart_idle", prefix)
 		}
+		for name, override := range policy.Employees {
+			rule, ok := configRuleIncludingDisabled(cfg, name)
+			if !ok || rule.Kind != kind {
+				return fmt.Errorf("%s.employees.%s 必须引用同 kind 的注册员工；核验 config.yaml 中员工 kind 或移除失效覆盖", prefix, name)
+			}
+			if err := validateEmployeeRuntimeProfile(override); err != nil {
+				return fmt.Errorf("%s.employees.%s: %w", prefix, name, err)
+			}
+			_, _, err := codexRuntimeProfileOverrides(rule.AgentArgs)
+			if err != nil {
+				return err
+			}
+		}
 		model, effort, err := codexRuntimeProfileOverridesForConfig(cfg, kind)
 		if err != nil {
 			return err
@@ -75,6 +88,9 @@ func codexRuntimeProfileOverridesForConfig(cfg Config, kind string) (string, str
 	var model, effort string
 	for _, rule := range cfg.Agents {
 		if rule.Disabled || rule.Kind != kind {
+			continue
+		}
+		if _, overridden := cfg.RuntimeProfiles[kind].Employees[rule.Name]; overridden {
 			continue
 		}
 		currentModel, currentEffort, err := codexRuntimeProfileOverrides(rule.AgentArgs)
@@ -182,9 +198,24 @@ func runtimeProfileForKind(cfg Config, kind string) (runtimeProfile, bool) {
 	return runtimeProfile{Kind: kind, Model: policy.Model, ReasoningEffort: policy.ReasoningEffort, OnDrift: policy.OnDrift}, true
 }
 
+func runtimeProfileForEmployee(cfg Config, kind, name string) (runtimeProfile, bool) {
+	p, ok := runtimeProfileForKind(cfg, kind)
+	if override, exists := cfg.RuntimeProfiles[kind].Employees[name]; ok && exists {
+		p.Model, p.ReasoningEffort = override.Model, override.ReasoningEffort
+	}
+	return p, ok
+}
+
 func nativeAgentArgsForConfig(cfg Config, rule AgentRule) ([]string, error) {
 	result := nativeAgentArgs(rule)
-	profile, ok := runtimeProfileForKind(cfg, rule.Kind)
+	if _, overridden := cfg.RuntimeProfiles[rule.Kind].Employees[rule.Name]; overridden {
+		var err error
+		result, err = withoutCodexModelArgs(result)
+		if err != nil {
+			return nil, err
+		}
+	}
+	profile, ok := runtimeProfileForEmployee(cfg, rule.Kind, rule.Name)
 	if !ok {
 		return result, nil
 	}
@@ -241,7 +272,7 @@ func runtimeProfileMismatch(expected, observed runtimeProfile) string {
 }
 
 func inspectLiveRuntimeProfile(ctx context.Context, reader HerdrAgentReader, cfg Config, binding LiveBinding) (runtimeProfile, runtimeProfile, string, error) {
-	expected, ok := runtimeProfileForKind(cfg, binding.Kind)
+	expected, ok := runtimeProfileForEmployee(cfg, binding.Kind, binding.Seat)
 	if !ok {
 		return runtimeProfile{}, runtimeProfile{}, "", nil
 	}
@@ -418,7 +449,7 @@ func (a *App) recoverRuntimeProfileSeat(ctx context.Context, workspaceID string,
 				}
 				return nil
 			}
-			expected, ok := runtimeProfileForKind(a.Config, rule.Kind)
+			expected, ok := runtimeProfileForEmployee(a.Config, rule.Kind, rule.Name)
 			if !ok {
 				return fmt.Errorf("seat %s 的 primary kind=%s 已无 runtime profile；拒绝用过期策略重启", rule.Name, rule.Kind)
 			}

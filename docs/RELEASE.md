@@ -1,4 +1,11 @@
-# HQ v1.2.2 正式发布与安装
+# HQ v1.2.3 正式发布与安装
+
+## v1.2.3 员工模型覆盖
+
+新增 `staff update --name SEAT --model MODEL --effort medium`。直属经理或 can_manage_staff 可调整无在途任务的员工；配置原子写入 `runtime_profiles.codex.employees`，不改变角色卡或业务验收。
+启动、巡检、空闲恢复必须一致使用员工覆盖；未覆盖员工保持 v1.2.2 行为。测试覆盖权限拒绝、在途任务拒绝、原生参数保留、配置不改变 seat，以及重启后模型保持和去重。
+在线员工未确认实际模型匹配前，新 issue 拒绝创建 assignment。staff get/list 的 expected_runtime_profile 仅表示期望值，实际值由 patrol 核验。停用保留配置，经批准更换 kind 时清除旧 kind 覆盖。
+发布门禁包含全量回归、race、vet、CLI 验收与 README 冒烟；公司实例需安装新二进制并重启 gateway 后才能使用新参数。该版本不改变人工授权或业务验收要求，也不验证 provider 模型可用性。
 
 HQ v1.2.2 是 v1.2.1 的销账活性修复版本：保留 registry v3、event v3 与公司实例合同，
 为忙碌回合中已送达但未执行的销账提醒增加空闲边界重武装。本文定义它的构建、
@@ -116,8 +123,8 @@ fail closed，并由公司所有者明确从 HQ 发布门禁中豁免；对应�
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.2.2 <完整小写commit> /tmp/hq-v1.2.2-release
-./scripts/release.sh verify /tmp/hq-v1.2.2-release
+./scripts/release.sh build v1.2.3 <完整小写commit> /tmp/hq-v1.2.3-release
+./scripts/release.sh verify /tmp/hq-v1.2.3-release
 ./scripts/test-gates.sh
 ```
 

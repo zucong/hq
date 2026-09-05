@@ -1,6 +1,13 @@
 # HQ 产品设计
 
-状态：**v1.2.2 已正式发布；本文定义当前正式合同**
+v1.2.3：员工运行模型覆盖。`runtime_profiles.codex.employees` 按稳定 seat slug 保存 model/effort，继承公司 on_drift；未覆盖员工保持原协议。
+`staff update --name SEAT --model MODEL --effort medium` 允许直属经理或 can_manage_staff 调整无在途合同的员工。
+runtime-seat fence 串行化与 issue/revision/activation 的竞争，配置锁内重新核验权限，候选配置严格重放后原子保存。
+运行参数不纳入 seat/role digest；覆盖启动时替换旧原生 model/effort，巡检与恢复使用同一 effective profile。
+这不提供 assignment 临时模型覆盖、预算或 provider 可用性验证。
+继续保留 v1.2.2 的销账空闲边界重武装及此前的投递活性协议。
+
+状态：**v1.2.3 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -790,7 +797,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.2.2 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.3 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

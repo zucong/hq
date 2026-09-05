@@ -37,8 +37,9 @@ func (a *App) staffConfigWriteOptions() configWriteOptions {
 
 type staffCapacityView struct {
 	AgentRule
-	ActiveWIP    int `json:"active_wip"`
-	AvailableWIP int `json:"available_wip"`
+	ActiveWIP              int                     `json:"active_wip"`
+	AvailableWIP           int                     `json:"available_wip"`
+	ExpectedRuntimeProfile *EmployeeRuntimeProfile `json:"expected_runtime_profile,omitempty"`
 }
 
 func staffCapacity(rule AgentRule, ledger *ledgerState) staffCapacityView {
@@ -48,6 +49,14 @@ func staffCapacity(rule AgentRule, ledger *ledgerState) staffCapacityView {
 		available = 0
 	}
 	return staffCapacityView{AgentRule: rule, ActiveWIP: active, AvailableWIP: available}
+}
+
+func staffCapacityWithRuntime(cfg Config, rule AgentRule, ledger *ledgerState) staffCapacityView {
+	view := staffCapacity(rule, ledger)
+	if profile, ok := runtimeProfileForEmployee(cfg, rule.Kind, rule.Name); ok {
+		view.ExpectedRuntimeProfile = &EmployeeRuntimeProfile{Model: profile.Model, ReasoningEffort: profile.ReasoningEffort}
+	}
+	return view
 }
 
 func (a *App) cmdStaff(args []string) error {
@@ -102,7 +111,7 @@ func (a *App) cmdStaffList(args []string) error {
 	}
 	views := make([]staffCapacityView, 0, len(selected))
 	for _, rule := range selected {
-		views = append(views, staffCapacity(rule, ledger))
+		views = append(views, staffCapacityWithRuntime(a.Config, rule, ledger))
 	}
 	if a.JSON {
 		return a.output(views, "")
@@ -134,9 +143,13 @@ func (a *App) cmdStaffGet(args []string) error {
 	if err != nil {
 		return fmt.Errorf("staff get 无法严格重放 ledger 以计算实时 WIP：%w", err)
 	}
-	view := staffCapacity(rule, ledger)
+	view := staffCapacityWithRuntime(a.Config, rule, ledger)
 	keepWarm, _ := effectiveSeatKeepWarm(rule)
-	return a.output(view, fmt.Sprintf("%s：sender=[%s] role=%s department=%s workstation=%s activation=%s keep_warm=%s active_wip=%d max_wip=%d available_wip=%d kind=%s reports_to=%s disabled=%t", rule.Name, rule.Label, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.WorkstationPath, rule.ActivationPolicy, keepWarm, view.ActiveWIP, rule.MaxWIP, view.AvailableWIP, rule.Kind, rule.ReportsTo, rule.Disabled))
+	runtimeText := ""
+	if view.ExpectedRuntimeProfile != nil {
+		runtimeText = fmt.Sprintf(" expected_model=%s expected_effort=%s（期望值；实际运行值请用 hq patrol --json 核验）", view.ExpectedRuntimeProfile.Model, view.ExpectedRuntimeProfile.ReasoningEffort)
+	}
+	return a.output(view, fmt.Sprintf("%s：sender=[%s] role=%s department=%s workstation=%s activation=%s keep_warm=%s active_wip=%d max_wip=%d available_wip=%d kind=%s reports_to=%s disabled=%t%s", rule.Name, rule.Label, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.WorkstationPath, rule.ActivationPolicy, keepWarm, view.ActiveWIP, rule.MaxWIP, view.AvailableWIP, rule.Kind, rule.ReportsTo, rule.Disabled, runtimeText))
 }
 
 func (a *App) staffMutationActor() (Actor, error) {
@@ -302,6 +315,8 @@ func (a *App) cmdStaffUpdate(args []string) error {
 	fs := newLeafParser("staff update")
 	fs.SetOutput(a.Err)
 	name := fs.String("name", "", "稳定 agent slug（不可原地改名）")
+	model := fs.String("model", "", "员工运行模型（与 --effort 一起使用）")
+	effort := fs.String("effort", "", "员工推理等级（与 --model 一起使用）")
 	label := fs.String("label", "", "新发件标识")
 	department := fs.String("department", "", "新工位目录")
 	kind := fs.String("kind", "", "新启动 kind")
@@ -319,6 +334,9 @@ func (a *App) cmdStaffUpdate(args []string) error {
 	approval := fs.String("approval", "", "生效 decisions 文件")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.Changed("model") || fs.Changed("effort") {
+		return a.updateEmployeeRuntimeProfile(*name, *model, *effort, fs.command.Flags())
 	}
 	actor, err := a.staffMutationActor()
 	if err != nil {
@@ -455,6 +473,10 @@ func (a *App) cmdStaffUpdate(args []string) error {
 			return fmt.Errorf("approval：%w", err)
 		}
 		rule.ApprovalRef, rule.UpdatedAt = cleanApproval, time.Now().UTC().Format(time.RFC3339)
+		if cfg.Agents[index].Kind != rule.Kind {
+			policy := cfg.RuntimeProfiles[cfg.Agents[index].Kind]
+			delete(policy.Employees, rule.Name)
+		}
 		cfg.Agents[index] = rule
 		updated = rule
 		return nil

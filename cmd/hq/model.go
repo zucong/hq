@@ -249,9 +249,15 @@ type RuntimeFallbackPolicy struct {
 // deliberately company-level rather than part of an employee seat: changing a
 // model carrier must not invalidate role cards, assignment contracts or WIP.
 type RuntimeProfilePolicy struct {
+	Model           string                            `json:"model" yaml:"model"`
+	ReasoningEffort string                            `json:"reasoning_effort" yaml:"reasoning_effort"`
+	OnDrift         string                            `json:"on_drift" yaml:"on_drift"`
+	Employees       map[string]EmployeeRuntimeProfile `json:"employees,omitempty" yaml:"employees,omitempty"`
+}
+
+type EmployeeRuntimeProfile struct {
 	Model           string `json:"model" yaml:"model"`
 	ReasoningEffort string `json:"reasoning_effort" yaml:"reasoning_effort"`
-	OnDrift         string `json:"on_drift" yaml:"on_drift"`
 }
 
 func validateNativeAgentArgs(label string, args []string) error {

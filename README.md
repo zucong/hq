@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.2.2 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.2.3 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -622,7 +622,7 @@ queue timeout 仍处于 working 的这种 runtime 报告为 `manager_busy_withou
 并升级要求核对 `nudge status/reconcile`。这个守卫只推动负责人作出决定，绝不自动 accept/return、改变 owner/status
 或生成质量结论。`hq patrol --json` 同时以 `stalled` finding 显示这类“人已空闲、durable 队列未清”的状态。
 
-验收完成也不能只靠 `account_closer` 自觉记得销账。gateway 的 closure queue watchdog 会从账本派生
+继续保留 v1.2.2 的销账空闲边界重武装。验收完成也不能只靠 `account_closer` 自觉记得销账。gateway 的 closure queue watchdog 会从账本派生
 `accepted|finding_accepted` 且无活动 assignment、无未收敛 workflow delivery、所有直属 child 均已 `closed` 的
 后序候选；`open|blocked|needs_decision` 永远不会被当作已批准关闭。唯一 `account_closer` 在 `idle|done` 且最早
 候选超过同一 queue timeout 时，会收到带 `case show`、`history` 与 `close` 模板的 durable nudge；每轮明确要求按顺序
@@ -943,6 +943,19 @@ gateway 的 closure queue watchdog 只选择已经 `accepted|finding_accepted` �
 叶节点，并在唯一 `account_closer` 空闲超时后发出 durable 提醒。它不选择 `open|blocked|needs_decision`，不生成
 关闭理由或 source，也不写 `case_closed`；实际关闭仍必须由销账人执行并通过同一重放门禁。
 
+### 员工模型覆盖（v1.2.3）
+
+公司 `runtime_profiles.codex` 提供默认模型与 effort。直属经理或 `can_manage_staff` 职责位可对无在途 assignment（含待投递 issue）的员工执行：
+
+```bash
+./bin/hq staff update --name <employee-slug> --model <native-model-id> --effort medium
+```
+
+必须同时指定 model/effort，不能混合人事参数或 `--approval`。覆盖保存为
+`runtime_profiles.codex.employees.<employee-slug>: {model: ..., reasoning_effort: ...}`，优先于公司默认及员工旧的原生模型参数；其他原生参数保留。本文原有 agent_args 冲突规则继续适用于未配置员工覆盖的席位。
+角色卡、seat version 和既有业务账本不变。`on_drift=restart_idle` 在安全空闲边界恢复在线员工，离线员工下次正式派工时生效；`report` 仅报告漂移。
+保存成功不等于运行已切换，必须运行 `hq patrol --json` 核验；在线员工未确认匹配前，新 `issue` 拒绝创建 assignment。`staff get` 和 `staff list --json` 显示期望配置 `expected_runtime_profile`，不代表实际运行值。停用员工保留覆盖；经批准更换员工 kind 时清除旧 kind 覆盖。当前是持久员工覆盖，不是 assignment 临时覆盖；不验证 provider 是否实际提供该模型。
+
 ### 只读 Project View
 
 当前 Project View 是该 HQ space 唯一项目的可见性投影，不是第二套 Project Charter。它以 HQ ledger 中 case 的当前业务投影为
@@ -1047,7 +1060,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.2.2 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.3 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证
