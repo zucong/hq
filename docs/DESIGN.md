@@ -1,6 +1,6 @@
 # HQ 产品设计
 
-状态：**v1.2.1 已正式发布；本文定义当前正式合同**
+状态：**v1.2.2 已正式发布；本文定义当前正式合同**
 
 产品：HQ for Herdr
 
@@ -688,7 +688,9 @@ needs-decision、投递异常或 progress escalation 是重新唤醒条件。`pa
 `accepted|finding_accepted`、无 active assignment、目标无未收敛 workflow delivery、所有直属 child 已
 `closed` 的当前 post-order 叶节点；`open|blocked|needs_decision` 不进入候选。最早候选的 status event 是稳定
 basis，唯一 `account_closer` 只有在精确在岗且 `idle|done` 超时后才收到 durable nudge。提示要求在一轮内按顺序逐项
-核验至多 8 个候选：先 `case show/history`，再由销账人自行提供 reason/source 执行 `close`。watchdog 不写 `case_closed`、不创造关闭
+核验至多 8 个候选：先 `case show/history`，再由销账人自行提供 reason/source 执行 `close`。一代有界提醒耗尽后不会自行循环；
+只有销账人在最后一次提醒之后又写入新的 durable 业务动作、队列仍未收敛，且 runtime 再次进入 `idle|done` 超时，watchdog 才以
+该业务 event 作为新 basis 重新武装。nudge、transport、runtime 等基础设施事实不具备重武装资格。watchdog 不写 `case_closed`、不创造关闭
 依据，也不把 finding 或提醒解释为批准；`patrol` 将未推进的队列报告为 `idle_with_closure_backlog`。
 
 ## 11. 事件账本与恢复
@@ -788,7 +790,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.2.1 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.2 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

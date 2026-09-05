@@ -1,10 +1,19 @@
-# HQ v1.2.1 正式发布与安装
+# HQ v1.2.2 正式发布与安装
 
-HQ v1.2.1 是 v1.2.0 的投递活性修复版本：保留 registry v3、event v3 与公司实例合同，
-修复连续唤醒预算的回合边界重置，并为被预算降级的行动消息增加可审计的延迟唤醒。本文定义它的构建、
+HQ v1.2.2 是 v1.2.1 的销账活性修复版本：保留 registry v3、event v3 与公司实例合同，
+为忙碌回合中已送达但未执行的销账提醒增加空闲边界重武装。本文定义它的构建、
 验证和新公司安装流程。该制品只配套
 当前 registry v3、event v3、不可变 Role Card、独立 Employee Workstation 和 Employee Seat 合同。
 开发期间的其他命令、配置或账本格式不是发布输入。
+
+## v1.2.2 销账空闲边界重武装
+
+- closure queue 的每一代提醒仍按稳定 basis 去重并受 `max_manager_queue_nudges` 限制；
+- 若一代提醒在 `account_closer` 的既有忙碌回合中送达，最后一次提醒后又出现该销账人写入的 durable 业务动作，
+  且原队列仍未收敛，则 gateway 在新的 `idle|done` 超时边界以该业务 event 重新武装一代提醒；
+- nudge、transport、runtime 和未完成 delivery attempt 不得制造重武装 basis；watchdog 仍不自动 close、不创建关闭依据、
+  不把 `open|blocked|needs_decision` 当作完成；
+- 回归覆盖 `2/2` 提醒耗尽、忙碌回合继续写业务、再次空闲后的单次重武装、跨轮去重以及业务状态零自动变更。
 
 ## v1.2.1 投递活性修复
 
@@ -107,8 +116,8 @@ fail closed，并由公司所有者明确从 HQ 发布门禁中豁免；对应�
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.2.1 <完整小写commit> /tmp/hq-v1.2.1-release
-./scripts/release.sh verify /tmp/hq-v1.2.1-release
+./scripts/release.sh build v1.2.2 <完整小写commit> /tmp/hq-v1.2.2-release
+./scripts/release.sh verify /tmp/hq-v1.2.2-release
 ./scripts/test-gates.sh
 ```
 

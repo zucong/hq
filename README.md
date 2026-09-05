@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.2.1 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.2.2 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -626,7 +626,9 @@ queue timeout 仍处于 working 的这种 runtime 报告为 `manager_busy_withou
 `accepted|finding_accepted` 且无活动 assignment、无未收敛 workflow delivery、所有直属 child 均已 `closed` 的
 后序候选；`open|blocked|needs_decision` 永远不会被当作已批准关闭。唯一 `account_closer` 在 `idle|done` 且最早
 候选超过同一 queue timeout 时，会收到带 `case show`、`history` 与 `close` 模板的 durable nudge；每轮明确要求按顺序
-逐项核验最多 8 个候选，提醒次数有界且按 status event basis 跨重启去重。守卫只要求销账人逐项核验理由和 source，不会自动执行
+逐项核验最多 8 个候选，提醒次数有界且按 status event basis 跨重启去重。如果这一代提醒在销账人已有的忙碌回合中送达、
+销账人随后写入了新的 durable 业务动作却没有收敛该队列，gateway 会在它再次进入 `idle|done` 并超过 timeout 后，以该业务动作
+作为新 basis 重新武装一代有界提醒；纯 transport/runtime/nudge 事件不能触发重武装。守卫只要求销账人逐项核验理由和 source，不会自动执行
 `close`，也不会把提醒本身当成关闭批准。`patrol` 以 `idle_with_closure_backlog` 报告这种验收与销账脱节。
 
 跨部门返工不是对旧 `accepted` report 执行 `return`，也不是一条 `message --kind handoff`。前者会倒转
@@ -1045,7 +1047,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.2.1 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.2 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证

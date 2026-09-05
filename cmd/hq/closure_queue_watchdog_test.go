@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -131,6 +133,74 @@ func TestClosureQueueWatchdogNudgesAccountCloserWithoutClosing(t *testing.T) {
 	}
 	if delivered != 1 {
 		t.Fatalf("durable closure nudge facts=%d want=1", delivered)
+	}
+}
+
+func TestClosureQueueWatchdogRearmsAfterBusyTurnBusinessProgress(t *testing.T) {
+	e, cfg, accepted := closureQueueFixture(t, "CLOSURE-REARM-001")
+	acceptedAt, err := parseOperationsTime("accepted.at", accepted.At)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := acceptedAt.Add(16 * time.Second)
+	control := newFakeHerdrControl(e.root, cfg.WorkspaceLabel)
+	addOperationsLive(&control.snapshot, cfg, e.root, "penny", "idle", "closure-rearm")
+	app := operationsTestApp(t, e, control, &now)
+
+	if err := app.runClosureQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := app.ledgerState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := ledgerNudgeByDedupe(ledger, closureQueueDedupe("penny", accepted.ID, 1))
+	if first == nil {
+		t.Fatal("missing first closure reminder")
+	}
+	firstAt, err := parseOperationsTime("first nudge.at", first.Origin.At)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = firstAt.Add(16 * time.Second)
+	if err := app.runClosureQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(fakePromptCalls(control)); got != 2 {
+		t.Fatalf("closure generation did not reach bounded 2/2: %d", got)
+	}
+
+	// Simulate the closer continuing another business turn after both reminders
+	// were delivered, without touching the still-open closure candidate.
+	activityAt := now.Add(time.Second)
+	activityApp := e.app(t)
+	activityApp.Out, activityApp.Err = io.Discard, io.Discard
+	activityApp.Store.(*Store).Now = func() time.Time { return activityAt }
+	e.setActor(t, "penny", "closure:rearm-activity", testAgentCWD(cfg, e.root, "penny"))
+	var out, errOut bytes.Buffer
+	activityApp.Out, activityApp.Err = &out, &errOut
+	if err := activityApp.run([]string{"message", "--to", "zantianyou", "--kind", "info", "--case", "CLOSURE-REARM-001-ROOT", "--text", "Later closer business action", "--delivery", "wakeup"}); err != nil {
+		t.Fatalf("later closer business action failed: %v\nstderr=%s\nstdout=%s", err, errOut.String(), out.String())
+	}
+
+	now = activityAt.Add(16 * time.Second)
+	if err := app.runClosureQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prompts := fakePromptCalls(control)
+	if len(prompts) != 3 || !strings.Contains(prompts[2], "新的空闲边界重新武装") ||
+		!strings.Contains(prompts[2], "CLOSURE-REARM-001") {
+		t.Fatalf("closure queue was not rearmed at the later idle boundary: %v", prompts)
+	}
+	if err := app.runClosureQueueWatchdogOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(fakePromptCalls(control)); got != 3 {
+		t.Fatalf("rearmed closure reminder duplicated: %d", got)
+	}
+	state, err := app.currentCase("CLOSURE-REARM-001")
+	if err != nil || state.Status != string(statusAccepted) {
+		t.Fatalf("rearmed watchdog made a business closure decision: state=%+v err=%v", state, err)
 	}
 }
 

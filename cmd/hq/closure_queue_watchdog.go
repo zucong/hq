@@ -117,6 +117,54 @@ func closureQueueDedupe(closer, basis string, stage int) string {
 	return strings.Join([]string{"closure-queue", closer, basis, "nudge", strconv.Itoa(stage)}, ":")
 }
 
+// closureQueueRearmEvent returns the latest durable business action performed
+// by the account closer after a completed reminder generation. A reminder can
+// be delivered while the closer is already working on another turn; if that
+// turn later writes business facts and the closer becomes idle again, those
+// facts are the durable evidence for a new wake opportunity. Infrastructure
+// and delivery-attempt events are deliberately excluded so transport churn can
+// never manufacture an unbounded reminder loop.
+func (s *ledgerState) closureQueueRearmEvent(closer string, afterSequence int64) Event {
+	latest := Event{}
+	for _, event := range s.events {
+		if event.Sequence <= afterSequence || event.Actor != closer || isInfrastructureEvent(event.Type) {
+			continue
+		}
+		businessAction := event.Type == "case_created" || event.Type == "case_revised" || event.ToState != ""
+		switch event.Type {
+		case "issue_sent", "report_sent", "case_escalation_sent", "message_sent", "message_acked",
+			"delivery_resolved_sent", "approval_granted", "approval_revoked", "approval_expired":
+			businessAction = true
+		}
+		if businessAction && event.Sequence > latest.Sequence {
+			latest = event
+		}
+	}
+	return latest
+}
+
+func closureQueueNudgeLastSequence(record *nudgeLedgerRecord) int64 {
+	if record == nil {
+		return 0
+	}
+	latest := record.Origin.Sequence
+	for _, event := range []Event{record.Claim, record.Attempt, record.Terminal} {
+		if event.Sequence > latest {
+			latest = event.Sequence
+		}
+	}
+	return latest
+}
+
+func closureQueueRearmedMessage(backlog ClosureQueueBacklog, stage, max int) string {
+	message := "HQ销账守卫已在新的空闲边界重新武装：此前提醒在忙碌回合中已投递，但队列没有落账收敛；本轮先处理该销账队列。" +
+		closureQueueReminderMessage(backlog, stage, max)
+	if _, err := validateBusinessText("message", message, true); err == nil {
+		return message
+	}
+	return closureQueueReminderMessage(backlog, stage, max)
+}
+
 func (a *App) runClosureQueueWatchdogOnce(ctx context.Context) error {
 	if a.Herdr == nil || a.Store == nil || a.MaintenancePane == "" {
 		return nil
@@ -141,37 +189,59 @@ func (a *App) runClosureQueueWatchdogOnce(ctx context.Context) error {
 	if statusErr != nil || (status != "idle" && status != "done") {
 		return nil
 	}
-	selectedAt, err := parseOperationsTime("closure queue selected_at", backlog.SelectedAt)
-	if err != nil {
-		return err
-	}
 	now := a.operationsNow()
 	stallAfter, _, maxNudges := a.Config.managerQueueWatchdogPolicy()
-	if now.Sub(selectedAt) < stallAfter {
-		return nil
-	}
-	lastAt := selectedAt
-	completedNudges := 0
-	for stage := 1; stage <= maxNudges; stage++ {
-		dedupe := closureQueueDedupe(backlog.Closer, backlog.BasisEventID, stage)
-		record := ledgerNudgeByDedupe(ledger, dedupe)
-		if record == nil {
-			break
+	basis, selectedAtText, rearmed := backlog.BasisEventID, backlog.SelectedAt, false
+	for {
+		selectedAt, parseErr := parseOperationsTime("closure queue selected_at", selectedAtText)
+		if parseErr != nil {
+			return parseErr
 		}
-		completedNudges = stage
-		lastAt, _ = parseOperationsTime("closure queue nudge.at", record.Origin.At)
-		if record.State == "queued" || record.State == "claimed" {
-			return a.driveQueueNudge(ctx, record.Origin.NudgeID, dedupe, record.Origin.Recipient, record.Origin.Message, false, false)
-		}
-		if record.State == "attempted" || record.State == "unknown" {
+		if now.Sub(selectedAt) < stallAfter {
 			return nil
 		}
+		lastAt := selectedAt
+		lastNudgeSequence := int64(0)
+		completedNudges := 0
+		for stage := 1; stage <= maxNudges; stage++ {
+			dedupe := closureQueueDedupe(backlog.Closer, basis, stage)
+			record := ledgerNudgeByDedupe(ledger, dedupe)
+			if record == nil {
+				break
+			}
+			completedNudges = stage
+			lastAt, _ = parseOperationsTime("closure queue nudge.at", record.Origin.At)
+			if sequence := closureQueueNudgeLastSequence(record); sequence > lastNudgeSequence {
+				lastNudgeSequence = sequence
+			}
+			if record.State == "queued" || record.State == "claimed" {
+				return a.driveQueueNudge(ctx, record.Origin.NudgeID, dedupe, record.Origin.Recipient, record.Origin.Message, false, false)
+			}
+			if record.State == "attempted" || record.State == "unknown" {
+				return nil
+			}
+		}
+		if completedNudges < maxNudges {
+			if completedNudges > 0 && now.Sub(lastAt) < stallAfter {
+				return nil
+			}
+			stage := completedNudges + 1
+			dedupe := closureQueueDedupe(backlog.Closer, basis, stage)
+			id := stableCommandID("closure-queue-nudge", dedupe)
+			message := closureQueueReminderMessage(*backlog, stage, maxNudges)
+			if rearmed {
+				message = closureQueueRearmedMessage(*backlog, stage, maxNudges)
+			}
+			return a.driveQueueNudge(ctx, id, dedupe, backlog.Closer, message, true, false)
+		}
+
+		// A completed reminder generation remains bounded. It is rearmed only
+		// when a later closer-authored business fact proves another busy turn
+		// finished, and only after the closer is idle/done again (checked above).
+		activity := ledger.closureQueueRearmEvent(backlog.Closer, lastNudgeSequence)
+		if activity.ID == "" {
+			return nil
+		}
+		basis, selectedAtText, rearmed = activity.ID, activity.At, true
 	}
-	if completedNudges >= maxNudges || (completedNudges > 0 && now.Sub(lastAt) < stallAfter) {
-		return nil
-	}
-	stage := completedNudges + 1
-	dedupe := closureQueueDedupe(backlog.Closer, backlog.BasisEventID, stage)
-	id := stableCommandID("closure-queue-nudge", dedupe)
-	return a.driveQueueNudge(ctx, id, dedupe, backlog.Closer, closureQueueReminderMessage(*backlog, stage, maxNudges), true, false)
 }

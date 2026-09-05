@@ -150,9 +150,34 @@ func TestDocumentationContractNamesFormalReleaseArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := string(raw)
-	for _, want := range []string{"v1.2.1", "/tmp/hq-v1.2.1-release", "v1.2.1 投递活性修复", "v1.2.0 加急在途变更", "v1.1.5 事件驱动的经理停车"} {
+	for _, want := range []string{"v1.2.2", "/tmp/hq-v1.2.2-release", "v1.2.2 销账空闲边界重武装", "v1.2.1 投递活性修复", "v1.2.0 加急在途变更", "v1.1.5 事件驱动的经理停车"} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("RELEASE.md missing first-release contract %q", want)
+		}
+	}
+}
+
+func TestDocumentationContractPublishesClosureIdleBoundaryRearm(t *testing.T) {
+	contracts := map[string][]string{
+		repositoryPath("README.md"): {
+			"v1.2.2", "新的 durable 业务动作", "新 basis 重新武装", "纯 transport/runtime/nudge 事件不能触发重武装",
+		},
+		repositoryPath("docs", "DESIGN.md"): {
+			"v1.2.2", "再次进入 `idle|done`", "新 basis 重新武装", "基础设施事实不具备重武装资格",
+		},
+		repositoryPath("docs", "RELEASE.md"): {
+			"v1.2.2 销账空闲边界重武装", "2/2", "再次空闲后的单次重武装", "不自动 close",
+		},
+	}
+	for path, wants := range contracts {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("%s missing closure idle-boundary rearm contract %q", path, want)
+			}
 		}
 	}
 }
@@ -197,10 +222,10 @@ func TestDocumentationContractPublishesUrgentDirectiveAndAtomicActiveRevision(t 
 func TestDocumentationContractPublishesQueuedActionRecovery(t *testing.T) {
 	contracts := map[string][]string{
 		repositoryPath("README.md"): {
-			"v1.2.1", "queued-action watchdog", "wake-budget-exhausted", "hq delivery consume", "显式由调用者选择的 `quiet|inject`",
+			"queued-action watchdog", "wake-budget-exhausted", "hq delivery consume", "显式由调用者选择的 `quiet|inject`",
 		},
 		repositoryPath("docs", "DESIGN.md"): {
-			"v1.2.1", "delivery_budget_reset", "queued-action watchdog", "assignment-progress 和 manager-queue",
+			"delivery_budget_reset", "queued-action watchdog", "assignment-progress 和 manager-queue",
 		},
 		repositoryPath("docs", "RELEASE.md"): {
 			"v1.2.1 投递活性修复", "延迟恢复", "显式 inject 不被提升",
