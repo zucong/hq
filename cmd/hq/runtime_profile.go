@@ -412,10 +412,6 @@ func (a *App) recoverRuntimeProfileSeat(ctx context.Context, workspaceID string,
 		}
 		defer unlock(upLock)
 
-		work, workErr := a.runtimeRecoveryWorkFor(rule.Name)
-		if workErr != nil {
-			return fmt.Errorf("读取 runtime profile durable recovery work：%w", workErr)
-		}
 		events, eventsErr := a.Sessions.List(SessionFilter{Agent: rule.Name})
 		if eventsErr != nil {
 			return eventsErr
@@ -453,6 +449,10 @@ func (a *App) recoverRuntimeProfileSeat(ctx context.Context, workspaceID string,
 			if !ok {
 				return fmt.Errorf("seat %s 的 primary kind=%s 已无 runtime profile；拒绝用过期策略重启", rule.Name, rule.Kind)
 			}
+			work, workErr := a.runtimeRecoveryWorkFor(rule.Name)
+			if workErr != nil {
+				return workErr
+			}
 			return a.startProfileRepairRuntime(ctx, workspaceID, rule, expected, runtimeProfile{Kind: rule.Kind, Model: "unknown", ReasoningEffort: "unknown"}, work)
 		}
 
@@ -477,6 +477,17 @@ func (a *App) recoverRuntimeProfileSeat(ctx context.Context, workspaceID string,
 			return nil
 		}
 		if mismatch == "" {
+			started, err := activeSessionForBinding(events, binding)
+			if err != nil {
+				return err
+			}
+			if started.Actor != "hq-runtime-profile" || latestSessionDiagnostic(events, started.SessionID).Type == sessionProfileRecoverySent {
+				return nil
+			}
+			work, workErr := a.runtimeRecoveryWorkFor(rule.Name)
+			if workErr != nil {
+				return workErr
+			}
 			return a.ensureProfileRecovery(ctx, rule, expected, binding, events, work)
 		}
 		if expected.OnDrift != runtimeProfileDriftRestartIdle {
@@ -498,6 +509,10 @@ func (a *App) recoverRuntimeProfileSeat(ctx context.Context, workspaceID string,
 		diagnostic := latestSessionDiagnostic(events, started.SessionID)
 		if (diagnostic.Type == sessionProfileRepairAttempting || diagnostic.Type == sessionProfileRepairUnknown) && !retryUnknown {
 			return fmt.Errorf("runtime profile close 尚未收敛：agent=%s session=%s latest=%s；先核验同一 incarnation/tab，确认仍在后由 can_manage_staff 角色运行 `hq --direct runtime repair-profile --agent %s --retry-unknown`", rule.Name, started.SessionID, diagnostic.Type, rule.Name)
+		}
+		work, workErr := a.runtimeRecoveryWorkFor(rule.Name)
+		if workErr != nil {
+			return workErr
 		}
 		if _, appendErr := a.appendDerivedSession(started, sessionProfileRepairAttempting, "hq-runtime-profile", "runtime profile mismatch confirmed: "+mismatch); appendErr != nil {
 			return fmt.Errorf("profile_repair_attempting 未落账，尚未关闭旧 tab：%w", appendErr)

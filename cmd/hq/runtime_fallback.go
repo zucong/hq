@@ -242,6 +242,39 @@ func (a *App) startFallbackRuntime(ctx context.Context, workspaceID string, rule
 }
 
 func (a *App) recoverRuntimeSeatFromSafeguard(ctx context.Context, workspaceID string, rule AgentRule, policy RuntimeFallbackPolicy, reader HerdrAgentReader, retryUnknown, requireAction bool) error {
+	// A healthy primary runtime needs no recovery manifest. Avoid replaying
+	// the entire company ledger for each healthy/never-started employee.
+	if !requireAction {
+		snapshot, err := a.herdrSnapshot(ctx)
+		if err != nil {
+			return err
+		}
+		var matches []HerdrAgent
+		for _, live := range snapshot.Agents {
+			if live.Name == rule.Name {
+				matches = append(matches, live)
+			}
+		}
+		if len(matches) == 1 && matches[0].Kind == policy.FromKind {
+			raw, err := reader.ReadAgent(ctx, rule.Name)
+			if err != nil {
+				return err
+			}
+			if !terminalShowsContentSafeguard(raw) {
+				return nil
+			}
+		}
+		if len(matches) == 0 {
+			events, err := a.Sessions.List(SessionFilter{Agent: rule.Name})
+			if err != nil {
+				return err
+			}
+			_, unresolved := unresolvedFallbackSession(events, policy)
+			if !unresolved && !fallbackPending(events, policy) {
+				return nil
+			}
+		}
+	}
 	releaseSeat, err := a.lockRuntimeSeat(rule.Name)
 	if err != nil {
 		return err

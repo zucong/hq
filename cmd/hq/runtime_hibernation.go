@@ -811,8 +811,38 @@ func (a *App) cmdRuntime(args []string) error {
 }
 
 func (a *App) runRuntimeReaperOnce(ctx context.Context) {
+	steps := []struct {
+		name string
+		run  func(*App) error
+	}{
+		{"runtime fallback", func(c *App) error { return c.recoverContentSafeguardsOnce(ctx) }},
+		{"runtime profile", func(c *App) error { return c.recoverRuntimeProfileDriftsOnce(ctx) }},
+		{"assignment activation", func(c *App) error { return c.recoverIssuedAssignmentActivationsOnce(ctx) }},
+		{"urgent directive watchdog", func(c *App) error { return c.runUrgentDirectiveWatchdogOnce(ctx) }},
+		{"queued action watchdog", func(c *App) error { return c.runQueuedActionWatchdogOnce(ctx) }},
+		{"assignment progress", func(c *App) error { return c.runAssignmentProgressWatchdogOnce(ctx) }},
+		{"manager queue watchdog", func(c *App) error { return c.runManagerQueueWatchdogOnce(ctx) }},
+		{"closure queue watchdog", func(c *App) error { return c.runClosureQueueWatchdogOnce(ctx) }},
+		{"runtime reaper", func(c *App) error { _, err := c.reapRuntimeSeats("", false, false); return err }},
+	}
+	for _, step := range steps {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := a.runRuntimeMaintenanceStep(ctx, step.run); err != nil {
+			fmt.Fprintf(a.Err, "[HQ %s] %v\n", step.name, err)
+		}
+	}
+}
+
+// Release the configuration lease between independent maintenance phases.
+// Every phase reloads its own config; registry mutations need not wait for an
+// entire company-wide scan of all watchdogs and all seats.
+func (a *App) runRuntimeMaintenanceStep(ctx context.Context, run func(*App) error) error {
 	if a.ConfigAccess != nil {
-		a.ConfigAccess.RLock()
+		if err := lockRWMutexReadContext(ctx, a.ConfigAccess); err != nil {
+			return err
+		}
 		defer a.ConfigAccess.RUnlock()
 	}
 	child := *a
@@ -826,8 +856,7 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 	if a.ConfigPath != "" {
 		cfg, err := loadConfig(a.ConfigPath)
 		if err != nil {
-			fmt.Fprintf(a.Err, "[HQ runtime reaper] reload config 失败：%v\n", err)
-			return
+			return fmt.Errorf("reload config 失败：%w", err)
 		}
 		child.Config = cfg
 	}
@@ -840,39 +869,5 @@ func (a *App) runRuntimeReaperOnce(ctx context.Context) {
 			fmt.Fprintf(a.Err, "[HQ maintenance binding] %v\n", bindingErr)
 		}
 	}
-	if fallbackErr := child.recoverContentSafeguardsOnce(ctx); fallbackErr != nil {
-		fmt.Fprintf(a.Err, "[HQ runtime fallback] %v\n", fallbackErr)
-	}
-	if profileErr := child.recoverRuntimeProfileDriftsOnce(ctx); profileErr != nil {
-		fmt.Fprintf(a.Err, "[HQ runtime profile] %v\n", profileErr)
-	}
-	if activationErr := child.recoverIssuedAssignmentActivationsOnce(ctx); activationErr != nil {
-		fmt.Fprintf(a.Err, "[HQ assignment activation] %v\n", activationErr)
-	}
-	if directiveErr := child.runUrgentDirectiveWatchdogOnce(ctx); directiveErr != nil {
-		fmt.Fprintf(a.Err, "[HQ urgent directive watchdog] %v\n", directiveErr)
-	}
-	if queuedActionErr := child.runQueuedActionWatchdogOnce(ctx); queuedActionErr != nil {
-		fmt.Fprintf(a.Err, "[HQ queued action watchdog] %v\n", queuedActionErr)
-	}
-	if progressErr := child.runAssignmentProgressWatchdogOnce(ctx); progressErr != nil {
-		fmt.Fprintf(a.Err, "[HQ assignment progress] %v\n", progressErr)
-	}
-	if queueErr := child.runManagerQueueWatchdogOnce(ctx); queueErr != nil {
-		fmt.Fprintf(a.Err, "[HQ manager queue watchdog] %v\n", queueErr)
-	}
-	if closureErr := child.runClosureQueueWatchdogOnce(ctx); closureErr != nil {
-		fmt.Fprintf(a.Err, "[HQ closure queue watchdog] %v\n", closureErr)
-	}
-	report, reapErr := child.reapRuntimeSeats("", false, false)
-	for _, view := range report.Seats {
-		for _, blocker := range view.Blockers {
-			if strings.HasPrefix(blocker, "reap_error:") {
-				fmt.Fprintf(a.Err, "[HQ runtime reaper] agent=%s %s next=%s\n", view.Agent, blocker, view.NextAction)
-			}
-		}
-	}
-	if reapErr != nil {
-		fmt.Fprintf(a.Err, "[HQ runtime reaper] %v\n", reapErr)
-	}
+	return run(&child)
 }

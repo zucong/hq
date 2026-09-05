@@ -1,4 +1,8 @@
-# HQ v1.2.3 正式发布与安装
+# HQ v1.2.4 正式发布与安装
+
+## v1.2.4 维护循环与配置写入活性
+
+修复维护循环长时间持有配置读锁、为无恢复需要的每个员工反复完整重放账本，从而阻塞 staff update 的问题。配置租约缩小为独立维护阶段，每阶段重载；健康模型和无 fallback 需要的席位跳过恢复清单重放。实际恢复仍走原有严格门禁，不以缓存或跳过审核代替验证。测试包含健康路径零恢复重放、维护阶段间可写、取消等待及原恢复路径回归；race 按影响范围执行针对性检测，不因补丁发布机械重复全量 race。
 
 ## v1.2.3 员工模型覆盖
 
@@ -123,8 +127,8 @@ fail closed，并由公司所有者明确从 HQ 发布门禁中豁免；对应�
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.2.3 <完整小写commit> /tmp/hq-v1.2.3-release
-./scripts/release.sh verify /tmp/hq-v1.2.3-release
+./scripts/release.sh build v1.2.4 <完整小写commit> /tmp/hq-v1.2.4-release
+./scripts/release.sh verify /tmp/hq-v1.2.4-release
 ./scripts/test-gates.sh
 ```
 
