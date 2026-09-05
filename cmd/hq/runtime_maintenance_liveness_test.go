@@ -93,3 +93,62 @@ func TestRuntimeMaintenanceConfigWaitIsCancellable(t *testing.T) {
 		t.Fatal("canceled lock wait succeeded")
 	}
 }
+
+func TestRuntimeMaintenanceQueuedWriterCannotBeOvertaken(t *testing.T) {
+	app := &App{ConfigAccess: &sync.RWMutex{}}
+	app.ConfigAccess.RLock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		unlock, err := app.lockGatewayConfigAccessContext(ctx, []string{"staff", "update"})
+		if err == nil {
+			unlock()
+		}
+		result <- err
+	}()
+	queued := false
+	for ctx.Err() == nil {
+		if !app.ConfigAccess.TryRLock() {
+			queued = true
+			break
+		}
+		app.ConfigAccess.RUnlock()
+		time.Sleep(time.Millisecond)
+	}
+	app.ConfigAccess.RUnlock()
+	if !queued {
+		t.Fatal("registry writer did not queue; maintenance readers can starve it")
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeMaintenanceCanceledWriterReleasesLateAcquisition(t *testing.T) {
+	app := &App{ConfigAccess: &sync.RWMutex{}}
+	app.ConfigAccess.RLock()
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { _, err := app.lockGatewayConfigAccessContext(ctx, []string{"staff", "update"}); result <- err }()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !app.ConfigAccess.TryRLock() {
+			break
+		}
+		app.ConfigAccess.RUnlock()
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if err := <-result; err == nil {
+		t.Fatal("canceled writer acquired")
+	}
+	app.ConfigAccess.RUnlock()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	unlock, err := app.lockGatewayConfigAccessContext(ctx2, []string{"staff", "update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}

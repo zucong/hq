@@ -1,4 +1,8 @@
-# HQ v1.2.4 正式发布与安装
+# HQ v1.2.5 正式发布与安装
+
+## v1.2.5 配置写请求排队
+
+v1.2.4 的真实复验仍出现写请求被读请求抢先：TryLock 轮询不会登记等待的 writer。v1.2.5 改用真实排队和可取消的锁交接，保证维护阶段结束后已排队的写请求先执行；取消后迟到的锁自动释放。新增反读饥饿与取消后无锁泄漏回归，按并发影响范围运行 targeted race。
 
 ## v1.2.4 维护循环与配置写入活性
 
@@ -127,8 +131,8 @@ fail closed，并由公司所有者明确从 HQ 发布门禁中豁免；对应�
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.2.4 <完整小写commit> /tmp/hq-v1.2.4-release
-./scripts/release.sh verify /tmp/hq-v1.2.4-release
+./scripts/release.sh build v1.2.5 <完整小写commit> /tmp/hq-v1.2.5-release
+./scripts/release.sh verify /tmp/hq-v1.2.5-release
 ./scripts/test-gates.sh
 ```
 

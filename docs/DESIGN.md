@@ -7,7 +7,9 @@ runtime-seat fence 串行化与 issue/revision/activation 的竞争，配置锁�
 这不提供 assignment 临时模型覆盖、预算或 provider 可用性验证。
 继续保留 v1.2.2 的销账空闲边界重武装及此前的投递活性协议。
 
-状态：**v1.2.4 已正式发布；本文定义当前正式合同**
+状态：**v1.2.5 已正式发布；本文定义当前正式合同**
+
+v1.2.5：registry 写请求真正排队等待配置 RWMutex，不再用 TryLock 定时碰运气；等待的 writer 阻止后续维护读请求抢先。取消请求及时返回，晚到的锁由获取者释放，不 dispatch 已取消命令。
 
 v1.2.4 维护活性修复：网关维护各阶段分别持有配置读锁并重新加载配置，不再整轮锁住注册表。正常 primary runtime、未启动且无恢复记录的 seat 不构造 fallback 恢复清单；模型无漂移且无待投递恢复信封时不重放业务账本。真正关闭、启动或恢复仍执行原有严格重放、runtime-seat、ESTOP 和 registry 门禁。
 
@@ -799,7 +801,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.2.4 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.2.5 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

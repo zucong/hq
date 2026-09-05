@@ -576,12 +576,35 @@ func (a *App) lockGatewayConfigAccessContext(ctx context.Context, args []string)
 	if a.ConfigAccess == nil {
 		return func() {}, nil
 	}
+	if isRegistryConfigMutation(args) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// A polling TryLock never registers a waiting writer with RWMutex.
+		// Queue the writer so the next maintenance RLock cannot overtake it.
+		// The unbuffered handoff also releases a lock acquired after cancellation.
+		acquired := make(chan struct{})
+		go func() {
+			a.ConfigAccess.Lock()
+			select {
+			case acquired <- struct{}{}:
+			case <-ctx.Done():
+				a.ConfigAccess.Unlock()
+			}
+		}()
+		select {
+		case <-acquired:
+			if err := ctx.Err(); err != nil {
+				a.ConfigAccess.Unlock()
+				return nil, err
+			}
+			return a.ConfigAccess.Unlock, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	try := a.ConfigAccess.TryRLock
 	unlock := a.ConfigAccess.RUnlock
-	if isRegistryConfigMutation(args) {
-		try = a.ConfigAccess.TryLock
-		unlock = a.ConfigAccess.Unlock
-	}
 	acquire := func() (bool, error) {
 		if err := ctx.Err(); err != nil {
 			return false, err
