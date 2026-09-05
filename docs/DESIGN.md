@@ -1,5 +1,17 @@
 # HQ 产品设计
 
+## v1.3.0：配置文件监控
+
+Gateway 以 fsnotify 监听 config.yaml 的父目录并过滤精确文件，支持原子 rename 保存；250ms 防抖、有界单槽通知队列与独立应用 worker 分离，慢 runtime I/O 不阻塞文件通知接收。每分钟读盘补偿遗漏，待应用席位每 5 秒重试。gateway 退出时取消并等待两个 goroutine，文件通知不可用时明确记录降级，不停止补偿核对。
+
+worker 严格解析完整注册表后按 effective employee model/effort/on_drift 比较，只排队变化席位；初次启动重新核对所有配置 profile 的在职席位。每个席位重新读取最新配置，过时目标不执行，应用复用现有 profile repair 的 runtime-seat/ESTOP/up/current-registry 门禁。配置读租约范围是单席位而非整批，单席位上下文上限 30 秒；已排队的配置 writer 可在席位之间先行。文件编辑器不遵守 HQ advisory lock，因此通知不等于事务授权，副作用前仍须核验 current-registry。
+
+无效配置不覆盖已校验的比较基线、不触发 runtime 变更；错误去重并提供修正文件和 doctor 的路径。修复保存后恢复检测，其他业务命令仍按当前磁盘配置 fail closed。`working|blocked` 不强制中断；离线且无待恢复记录的员工不启动；`report` 不切换；fallback 不自动切回。unknown close 不重试，既有恢复记录保证 gateway 重启后的连续性，内存 pending 队列不是业务事实。
+
+`staff get --live --json` 是只读实时证据视图：期望配置与 observed 分离，核验前后 incarnation 一致，显式区分 pending/working 等待、下次激活、report_only、unverified、repair_unknown/failed、recovery_pending 与 applied。tab ID 可能因恢复式重启变化，seat/角色卡/工位/assignment 不变。默认 staff get/list 仍支持无 Herdr 首验；无 --live 的 get 为 not_checked。监控不改变模型修改授权或在途任务门禁，不自动修改业务验收。
+
+以下为已发布基线及延续的协议。
+
 v1.2.3：员工运行模型覆盖。`runtime_profiles.codex.employees` 按稳定 seat slug 保存 model/effort，继承公司 on_drift；未覆盖员工保持原协议。
 `staff update --name SEAT --model MODEL --effort medium` 允许直属经理或 can_manage_staff 调整无在途合同的员工。
 runtime-seat fence 串行化与 issue/revision/activation 的竞争，配置锁内重新核验权限，候选配置严格重放后原子保存。
@@ -7,7 +19,7 @@ runtime-seat fence 串行化与 issue/revision/activation 的竞争，配置锁�
 这不提供 assignment 临时模型覆盖、预算或 provider 可用性验证。
 继续保留 v1.2.2 的销账空闲边界重武装及此前的投递活性协议。
 
-状态：**v1.2.5 已正式发布；本文定义当前正式合同**
+状态：**v1.3.0 已正式发布；本文定义当前正式合同**
 
 v1.2.5：registry 写请求真正排队等待配置 RWMutex，不再用 TryLock 定时碰运气；等待的 writer 阻止后续维护读请求抢先。取消请求及时返回，晚到的锁由获取者释放，不 dispatch 已取消命令。
 
@@ -801,7 +813,7 @@ prepared 且目标离线的 wakeup message 时，cold-resume 可以取得 up loc
 - ledger 中的权威 envelope 只接受 event v3；
 - 角色卡、employee seat 和 assignment 是当前唯一组织与委派模型；
 - `on_assignment` runtime hibernation 不删除 seat/角色卡/工位，不改变业务终态；
-- v1.2.5 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.3.0 只承诺当前 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 产品改进以实际使用反馈驱动，但不能牺牲可审计性、幂等、恢复和权限边界。
 
 ## 16. 验收标准

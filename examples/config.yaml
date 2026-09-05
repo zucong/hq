@@ -3,6 +3,9 @@ workspace_label: example-hq
 owner_principal: Ada
 # 可选：启用公司默认模型后，直属经理可用 staff update --model/--effort
 # 为员工写入 employees 覆盖。模型 ID 请使用当前运行环境实际提供的值。
+# v1.3.0：gateway 自动监控保存（250ms 防抖，每分钟补偿）；restart_idle
+# 只在 idle|done 安全替换 runtime，忙碌延后，离线下次激活。report 不切换。
+# 用 hq staff get --name <seat> --live --json 核验实际值；不要把保存成功当作生效。
 # runtime_profiles:
 #     codex:
 #         model: <native-model-id>

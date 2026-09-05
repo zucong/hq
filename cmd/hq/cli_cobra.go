@@ -278,8 +278,11 @@ Agent 类型和权限模式。
 
 func isDependencyFreeReadOnlyCommand(path string, cmd *cobra.Command) bool {
 	switch path {
-	case "staff list", "staff get", "role list", "role show", "project list", "project show", "assignment list", "assignment show":
+	case "staff list", "role list", "role show", "project list", "project show", "assignment list", "assignment show":
 		return true
+	case "staff get":
+		live, err := cmd.Flags().GetBool("live")
+		return err == nil && !live
 	case "board":
 		casesOnly, casesErr := cmd.Flags().GetBool("cases-only")
 		reindex, reindexErr := cmd.Flags().GetBool("reindex")
@@ -476,6 +479,7 @@ func addLeafFlags(cmd *cobra.Command, path ...string) {
 		addString("reports-to", "仅列出直属上级为该 agent slug 的员工")
 	case "staff get":
 		addString("name", "稳定 agent slug（必填）")
+		addBool("live", "只读核验实际 model/effort 与待应用原因（需要 Herdr；不切换 runtime）")
 	case "staff add":
 		addString("name", "稳定 agent slug（必填）")
 		addString("label", "句头发件标识（必填；不含方括号）")

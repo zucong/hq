@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -40,6 +41,7 @@ type staffCapacityView struct {
 	ActiveWIP              int                     `json:"active_wip"`
 	AvailableWIP           int                     `json:"available_wip"`
 	ExpectedRuntimeProfile *EmployeeRuntimeProfile `json:"expected_runtime_profile,omitempty"`
+	RuntimeProfileStatus   *employeeProfileStatus  `json:"runtime_profile_status,omitempty"`
 }
 
 func staffCapacity(rule AgentRule, ledger *ledgerState) staffCapacityView {
@@ -132,6 +134,7 @@ func (a *App) cmdStaffGet(args []string) error {
 	fs := newLeafParser("staff get")
 	fs.SetOutput(a.Err)
 	name := fs.String("name", "", "稳定 agent slug")
+	live := fs.Bool("live", false, "只读核验实际 model/effort 与待应用原因（需要 Herdr；不切换 runtime）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -144,10 +147,22 @@ func (a *App) cmdStaffGet(args []string) error {
 		return fmt.Errorf("staff get 无法严格重放 ledger 以计算实时 WIP：%w", err)
 	}
 	view := staffCapacityWithRuntime(a.Config, rule, ledger)
+	if view.ExpectedRuntimeProfile != nil {
+		view.RuntimeProfileStatus = &employeeProfileStatus{State: "not_checked", Reason: "仅显示期望配置；运行 hq staff get --name " + rule.Name + " --live --json 核验实际 model/effort 与待应用原因"}
+		if *live {
+			ctx, cancel := context.WithTimeout(a.requestContext(), configWatchSeatTimeout)
+			defer cancel()
+			view.RuntimeProfileStatus = a.employeeRuntimeProfileStatus(ctx, rule)
+		}
+	}
 	keepWarm, _ := effectiveSeatKeepWarm(rule)
 	runtimeText := ""
 	if view.ExpectedRuntimeProfile != nil {
-		runtimeText = fmt.Sprintf(" expected_model=%s expected_effort=%s（期望值；实际运行值请用 hq patrol --json 核验）", view.ExpectedRuntimeProfile.Model, view.ExpectedRuntimeProfile.ReasoningEffort)
+		status := view.RuntimeProfileStatus
+		runtimeText = fmt.Sprintf(" expected_model=%s expected_effort=%s profile_state=%s reason=%s", view.ExpectedRuntimeProfile.Model, view.ExpectedRuntimeProfile.ReasoningEffort, status.State, status.Reason)
+		if status.Observed != nil {
+			runtimeText += fmt.Sprintf(" observed_model=%s observed_effort=%s", status.Observed.Model, status.Observed.ReasoningEffort)
+		}
 	}
 	return a.output(view, fmt.Sprintf("%s：sender=[%s] role=%s department=%s workstation=%s activation=%s keep_warm=%s active_wip=%d max_wip=%d available_wip=%d kind=%s reports_to=%s disabled=%t%s", rule.Name, rule.Label, roleCardKey(rule.RoleCardID, rule.RoleCardVersion), rule.Department, rule.WorkstationPath, rule.ActivationPolicy, keepWarm, view.ActiveWIP, rule.MaxWIP, view.AvailableWIP, rule.Kind, rule.ReportsTo, rule.Disabled, runtimeText))
 }

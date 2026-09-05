@@ -357,13 +357,34 @@ func (a *App) runPreparedGateway(prepared preparedGateway, workspaceID, serverID
 	return err
 }
 
+type gatewaySynchronizedWriter struct {
+	mu     *sync.Mutex
+	writer io.Writer
+}
+
+func (w gatewaySynchronizedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
+}
+
 func (a *App) serveGateway(ctx context.Context, listener net.Listener, workspaceID, serverID string) error {
+	// Request handlers and both background workers may log concurrently.
+	child := *a
+	outputMu := &sync.Mutex{}
+	child.Out = gatewaySynchronizedWriter{outputMu, a.Out}
+	child.Err = gatewaySynchronizedWriter{outputMu, a.Err}
+	a = &child
 	semaphore := make(chan struct{}, gatewayMaxHandlers)
 	var handlers sync.WaitGroup
 	defer handlers.Wait()
 	var reaper sync.WaitGroup
 	if a.RuntimeReaperInterval > 0 && a.Herdr != nil && a.Sessions != nil && a.Store != nil {
 		reaperCtx, cancelReaper := context.WithCancel(ctx)
+		if a.ConfigPath != "" {
+			reaper.Add(1)
+			go func() { defer reaper.Done(); a.runConfigWatcher(reaperCtx) }()
+		}
 		reaper.Add(1)
 		go func() {
 			defer reaper.Done()

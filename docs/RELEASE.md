@@ -1,4 +1,11 @@
-# HQ v1.2.5 正式发布与安装
+# HQ v1.3.0 正式发布与安装
+
+## v1.3.0：配置文件监控
+
+- 新增 fsnotify 父目录监听、250ms 防抖、独立应用 worker、每分钟补偿读盘和待应用席位 5 秒重试；不新增生命周期子命令，不使用 Viper。
+- 复用安全 runtime repair：忙碌延后、离线不唤醒、report 只报告、unknown close 禁止重复启动，恢复任务而不改业务账本。
+- 新增 `staff get --name SEAT --live --json` 只读查看实际 model/effort、tab、状态与原因；默认查询继续无 Herdr 可用。
+- 发布验证覆盖真实文件系统原子保存、连续保存、无效配置修复、漏通知补偿、忙碌到空闲、在途 assignment 恢复、未知关闭防重、退出取消和 CLI 自纠正；普通全量测试、相关 targeted race、vet 与 README 首验通过。公司实例安装新 binary 并重启 gateway 后生效，不要求重启员工或迁移配置/账本。
 
 ## v1.2.5 配置写请求排队
 
@@ -131,8 +138,8 @@ fail closed，并由公司所有者明确从 HQ 发布门禁中豁免；对应�
 在 HQ 独立源码仓库根执行：
 
 ```bash
-./scripts/release.sh build v1.2.5 <完整小写commit> /tmp/hq-v1.2.5-release
-./scripts/release.sh verify /tmp/hq-v1.2.5-release
+./scripts/release.sh build v1.3.0 <完整小写commit> /tmp/hq-v1.3.0-release
+./scripts/release.sh verify /tmp/hq-v1.3.0-release
 ./scripts/test-gates.sh
 ```
 

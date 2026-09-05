@@ -4,7 +4,7 @@ HQ 是面向 Herdr 虚拟公司的总部控制面。它把公司启动、人员�
 可靠投递、审计恢复和运行巡视收拢到一个 Go CLI 与本地网关中，让一组长期运行的 agent
 能够像一家公司一样分工、协作和对结果负责。
 
-**产品状态：v1.2.5 已正式发布。** 当前正式合同只有 registry v3 和
+**产品状态：v1.3.0 已正式发布。** 当前正式合同只有 registry v3 和
 event v3。不存在可依赖的旧版命令、配置或事件协议。投入真实公司前应完成初始化、
 `doctor`、隔离 workspace 验证和受控 canary。
 
@@ -956,6 +956,26 @@ gateway 的 closure queue watchdog 只选择已经 `accepted|finding_accepted` �
 角色卡、seat version 和既有业务账本不变。`on_drift=restart_idle` 在安全空闲边界恢复在线员工，离线员工下次正式派工时生效；`report` 仅报告漂移。
 保存成功不等于运行已切换，必须运行 `hq patrol --json` 核验；在线员工未确认匹配前，新 `issue` 拒绝创建 assignment。`staff get` 和 `staff list --json` 显示期望配置 `expected_runtime_profile`，不代表实际运行值。停用员工保留覆盖；经批准更换员工 kind 时清除旧 kind 覆盖。当前是持久员工覆盖，不是 assignment 临时覆盖；不验证 provider 是否实际提供该模型。
 
+### 配置文件监控（v1.3.0）
+
+Gateway 自动监控固定 `config.yaml` 所在目录；人工保存文件和 `hq staff update` 的原子写入走同一检测路径，无须新增启动命令或重启 gateway。使用 fsnotify，不引入 Viper、环境变量覆盖或第二份配置。
+
+- 文件通知按 250ms 防抖合并；严格校验完整 YAML 后，按员工最终生效的 model/effort/on_drift 比较，只安排受影响席位。公司默认变化也遵循员工覆盖优先级，注释或等价保存不触发重启。
+- `restart_idle` 在精确绑定的 `idle|done` 边界安全替换 runtime；`working|blocked` 等待，每 5 秒重试待应用席位。离线员工保留休眠，下次正式激活生效；`report` 仍只报告，停用员工不激活，不自动撤销已有 fallback。
+- 监控独立于维护巡检；每分钟重新读取配置以补偿文件通知遗漏，原周期 profile 巡检继续核对运行漂移。250ms 是防抖窗口，不是切换完成时限；锁、终端状态及启动时间可能使应用延后。
+- 无效 YAML、缺失文件或非法参数只报错，不使用部分配置、不因此关闭 runtime；修正保存后自动重试。不把旧有效配置用于绕过当前配置校验，依赖无效配置的 HQ 命令仍会拒绝执行。
+- 切换复用原有 seat/ESTOP/current-registry 门禁和任务恢复信封，角色卡与业务账本不变。它是恢复式重启，**tab/session ID 可能变化**，不是原 tab 内热改模型；关闭结果不确定时继续 fail closed，禁止自动创建第二个 runtime。
+
+查看某一员工的实际状态：
+
+```bash
+./bin/hq staff get --name <employee-slug> --live --json
+```
+
+`expected_runtime_profile` 是配置期望；`runtime_profile_status.observed` 仅来自终端证据，并带有 `tab_id`、`runtime_status`、`checked_at`。`state`/`reason` 区分 `applied`、`waiting_idle`、`pending`、`next_activation`、`report_only`、`unverified`、`waiting_ui`、`different_kind` 和恢复异常；模型匹配但恢复信封尚未送达时为 `recovery_pending`，不是全部恢复完成。查询本身只读，不触发切换。
+
+不带 `--live` 的 `staff get` 仍可在未安装 Herdr 时查询配置/WIP，状态为 `not_checked`；`staff list --json` 仍只显示期望。Agent 修改模型继续使用获授权的 `staff update`，监控不授予绕过权限、在途 assignment 门禁或直接修改组织定义的权力。
+
 ### 只读 Project View
 
 当前 Project View 是该 HQ space 唯一项目的可见性投影，不是第二套 Project Charter。它以 HQ ledger 中 case 的当前业务投影为
@@ -1060,7 +1080,7 @@ cold-resume 反向等待父进程。
 
 - registry 只接受严格 YAML v3，权威事件只使用 event v3；
 - gateway 和 Herdr snapshot 也必须匹配当前代码中明确定义的版本与必填字段；
-- v1.2.5 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
+- v1.3.0 只承诺本文记录的 registry v3、event v3 与 CLI 合同；开发中的其他格式不是产品输入；
 - 正式公司实例必须由当前 `hq init` 生成，不接收开发期间的资料目录作为运行输入。
 
 ## 验证
